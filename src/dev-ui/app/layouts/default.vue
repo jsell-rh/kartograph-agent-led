@@ -29,6 +29,7 @@ import {
   Plug,
   Settings2,
   Activity,
+  Wand2,
 } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
@@ -190,6 +191,7 @@ const navSections: NavSection[] = [
   {
     title: 'Connect',
     items: [
+      { label: 'Setup Wizard', icon: Wand2, to: '/knowledge-graphs/setup' },
       { label: 'Knowledge Graphs', icon: Share2, to: '/knowledge-graphs' },
       { label: 'Data Sources', icon: Cable, to: '/data-sources' },
       { label: 'Sync Jobs', icon: Activity, to: '/sync-jobs' },
@@ -234,6 +236,7 @@ const breadcrumbs = computed(() => {
     '/query': 'Query Console',
     '/integrate/mcp': 'MCP Integration',
     '/knowledge-graphs': 'Knowledge Graphs',
+    '/knowledge-graphs/setup': 'Setup Wizard',
     '/data-sources': 'Data Sources',
     '/sync-jobs': 'Sync Jobs',
   }
