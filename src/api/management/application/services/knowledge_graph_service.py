@@ -149,7 +149,7 @@ class KnowledgeGraphService:
             tenant_id=self._tenant_id,
         )
 
-    async def delete_knowledge_graph(self, kg_id: str, user_id: str) -> None:
+    async def delete_knowledge_graph(self, kg_id: str, user_id: str) -> bool:
         """Delete a KnowledgeGraph with MANAGE permission check.
 
         Retrieves the KG, checks MANAGE permission, marks it for deletion,
@@ -161,14 +161,14 @@ class KnowledgeGraphService:
             user_id: The user requesting deletion.
 
         Returns:
-            None (idempotent — no error if already deleted).
+            True if the KG was deleted, False if it was not found.
 
         Raises:
             UnauthorizedError: If the user lacks MANAGE permission.
         """
         kg = await self._kg_repository.get_by_id(KnowledgeGraphId(value=kg_id))
         if kg is None:
-            return None
+            return False
 
         authorized = await self._check_kg_permission(kg_id, user_id, Permission.MANAGE)
         if not authorized:
@@ -179,3 +179,4 @@ class KnowledgeGraphService:
         async with self._session.begin():
             kg.mark_for_deletion(deleted_by=user_id)
             await self._kg_repository.delete(kg)
+        return True

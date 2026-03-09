@@ -232,4 +232,4 @@ class TestKnowledgeGraphServiceDelete:
         result = await service.delete_knowledge_graph(
             kg_id="nonexistent-id", user_id="user-xyz"
         )
-        assert result is None
+        assert result is False

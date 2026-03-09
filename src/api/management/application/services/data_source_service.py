@@ -187,7 +187,7 @@ class DataSourceService:
             tenant_id=self._tenant_id,
         )
 
-    async def delete_data_source(self, ds_id: str, user_id: str) -> None:
+    async def delete_data_source(self, ds_id: str, user_id: str) -> bool:
         """Delete a DataSource and its encrypted credentials.
 
         Checks MANAGE permission, deletes credentials from the secret store
@@ -199,14 +199,14 @@ class DataSourceService:
             user_id: The user requesting deletion.
 
         Returns:
-            None (idempotent — no error if already deleted).
+            True if the DataSource was deleted, False if it was not found.
 
         Raises:
             UnauthorizedError: If user lacks MANAGE permission.
         """
         ds = await self._ds_repository.get_by_id(DataSourceId(value=ds_id))
         if ds is None:
-            return None
+            return False
 
         authorized = await self._check_ds_permission(ds_id, user_id, Permission.MANAGE)
         if not authorized:
@@ -224,3 +224,4 @@ class DataSourceService:
 
             ds.mark_for_deletion(deleted_by=user_id)
             await self._ds_repository.delete(ds)
+        return True
