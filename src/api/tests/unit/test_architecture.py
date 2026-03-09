@@ -588,3 +588,91 @@ class TestIAMInfrastructureLayerBoundaries:
             .may_import("iam.domain*", "iam.ports*")
             .check("iam")
         )
+
+
+class TestIngestionDomainLayerBoundaries:
+    """Tests that the Ingestion domain layer has no forbidden dependencies."""
+
+    def test_ingestion_domain_does_not_import_infrastructure(self):
+        """Ingestion domain layer should not depend on infrastructure."""
+        (
+            archrule("ingestion_domain_no_infrastructure")
+            .match("ingestion.domain*")
+            .should_not_import("ingestion.infrastructure*")
+            .check("ingestion")
+        )
+
+    def test_ingestion_domain_does_not_import_application(self):
+        """Ingestion domain layer should not depend on application layer."""
+        (
+            archrule("ingestion_domain_no_application")
+            .match("ingestion.domain*")
+            .should_not_import("ingestion.application*")
+            .check("ingestion")
+        )
+
+    def test_ingestion_domain_does_not_import_fastapi(self):
+        """Ingestion domain layer should not depend on FastAPI."""
+        (
+            archrule("ingestion_domain_no_fastapi")
+            .match("ingestion.domain*")
+            .should_not_import("fastapi*", "starlette*")
+            .check("ingestion")
+        )
+
+
+class TestIngestionPortsLayerBoundaries:
+    """Tests that the Ingestion ports layer has no forbidden dependencies."""
+
+    def test_ingestion_ports_does_not_import_infrastructure(self):
+        """Ingestion ports should not depend on infrastructure implementations."""
+        (
+            archrule("ingestion_ports_no_infrastructure")
+            .match("ingestion.ports*")
+            .should_not_import("ingestion.infrastructure*")
+            .check("ingestion")
+        )
+
+    def test_ingestion_ports_does_not_import_application(self):
+        """Ingestion ports should not depend on application layer."""
+        (
+            archrule("ingestion_ports_no_application")
+            .match("ingestion.ports*")
+            .should_not_import("ingestion.application*")
+            .check("ingestion")
+        )
+
+
+class TestIngestionInfrastructureLayerBoundaries:
+    """Tests that Ingestion infrastructure has appropriate dependencies."""
+
+    def test_ingestion_infrastructure_does_not_import_application(self):
+        """Ingestion infrastructure should not depend on application layer."""
+        (
+            archrule("ingestion_infrastructure_no_application")
+            .match("ingestion.infrastructure*")
+            .should_not_import("ingestion.application*")
+            .check("ingestion")
+        )
+
+    def test_ingestion_infrastructure_can_import_domain_and_ports(self):
+        """Ingestion infrastructure can import domain and ports."""
+        (
+            archrule("ingestion_infrastructure_may_import_domain_ports")
+            .match("ingestion.infrastructure*")
+            .may_import("ingestion.domain*", "ingestion.ports*")
+            .check("ingestion")
+        )
+
+
+class TestIngestionSharedKernelBoundary:
+    """Tests that Ingestion context properly uses shared_kernel."""
+
+    def test_ingestion_can_import_shared_kernel(self):
+        """Ingestion context may import from shared_kernel."""
+        (
+            archrule("ingestion_may_import_shared_kernel")
+            .match("ingestion*")
+            .may_import("shared_kernel*")
+            .check("ingestion")
+        )
