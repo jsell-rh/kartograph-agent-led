@@ -58,4 +58,4 @@ SPICEDB_ENDPOINT = { value = "localhost:50051", skip_if_set = true }
 SPICEDB_PRESHARED_KEY = { value = "changeme", skip_if_set = true }
 SPICEDB_USE_TLS = { value = "true", skip_if_set = true }
 # Path to self-signed certificate (relative to src/api)
-SPICEDB_CERT_PATH = { value = "../../certs/spicedb-cert.pem", transform = true }
+SPICEDB_CERT_PATH = { value = "../../certs/spicedb-cert.pem", transform = true, skip_if_set = true }
