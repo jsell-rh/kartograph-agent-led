@@ -67,6 +67,28 @@ export interface APIKeyCreatedResponse extends APIKeyResponse {
   secret: string
 }
 
+// ── Management Types ───────────────────────────────────────────────────────
+
+export interface KnowledgeGraphResponse {
+  id: string
+  tenant_id: string
+  workspace_id: string
+  name: string
+  description: string
+}
+
+export interface DataSourceResponse {
+  id: string
+  tenant_id: string
+  knowledge_graph_id: string
+  name: string
+  adapter_type: string
+  connection_config: Record<string, string>
+  has_credentials: boolean
+  schedule_type: string
+  schedule_value: string | null
+}
+
 // ── Graph Types ────────────────────────────────────────────────────────────
 
 export interface NodeRecord {

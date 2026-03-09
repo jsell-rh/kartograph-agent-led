@@ -189,7 +189,8 @@ const navSections: NavSection[] = [
   {
     title: 'Connect',
     items: [
-      { label: 'Data Sources', icon: Cable, to: '#', disabled: true, badge: 'Soon' },
+      { label: 'Knowledge Graphs', icon: Share2, to: '/knowledge-graphs' },
+      { label: 'Data Sources', icon: Cable, to: '/data-sources' },
     ],
   },
   {
@@ -230,6 +231,8 @@ const breadcrumbs = computed(() => {
     '/graph/mutations': 'Mutations',
     '/query': 'Query Console',
     '/integrate/mcp': 'MCP Integration',
+    '/knowledge-graphs': 'Knowledge Graphs',
+    '/data-sources': 'Data Sources',
   }
 
   if (path !== '/' && routeLabels[path]) {

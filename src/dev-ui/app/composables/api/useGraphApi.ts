@@ -27,7 +27,7 @@ export function useGraphApi() {
    */
   async function applyMutations(
     jsonlContent: string,
-    options?: { signal?: AbortSignal },
+    options?: { signal?: AbortSignal; knowledgeGraphId?: string | null },
   ): Promise<MutationResult> {
     const config = useRuntimeConfig()
     const { accessToken } = useAuth()
@@ -43,8 +43,13 @@ export function useGraphApi() {
       headers['X-Tenant-ID'] = currentTenantId.value
     }
 
+    const url = new URL(`${config.public.apiBaseUrl}/graph/mutations`)
+    if (options?.knowledgeGraphId) {
+      url.searchParams.set('knowledge_graph_id', options.knowledgeGraphId)
+    }
+
     const response = await fetch(
-      `${config.public.apiBaseUrl}/graph/mutations`,
+      url.toString(),
       {
         method: 'POST',
         headers,
