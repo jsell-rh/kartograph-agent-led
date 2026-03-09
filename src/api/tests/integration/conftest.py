@@ -437,7 +437,8 @@ async def clean_iam_tables(
     test_api_key_auth.py, test_auth_enforcement.py).
 
     Deletion order respects FK constraints:
-    outbox -> api_keys -> groups -> users -> workspaces (children) ->
+    outbox -> api_keys -> groups -> users -> management_credentials ->
+    data_sources -> knowledge_graphs -> workspaces (children) ->
     workspaces (roots, non-default) -> tenants (non-default)
     """
     from infrastructure.settings import get_iam_settings
@@ -453,6 +454,9 @@ async def clean_iam_tables(
                 await session.execute(text("DELETE FROM api_keys"))
                 await session.execute(text("DELETE FROM groups"))
                 await session.execute(text("DELETE FROM users"))
+                await session.execute(text("DELETE FROM management_credentials"))
+                await session.execute(text("DELETE FROM data_sources"))
+                await session.execute(text("DELETE FROM knowledge_graphs"))
                 await session.execute(
                     text("DELETE FROM workspaces WHERE parent_workspace_id IS NOT NULL")
                 )
