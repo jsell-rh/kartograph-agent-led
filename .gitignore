@@ -169,3 +169,7 @@ certs/
 
 # Demo web interface (not for production)
 demo-web/
+
+# Agent worktrees and per-worktree dev env config
+.worktrees/
+.env.worktree
