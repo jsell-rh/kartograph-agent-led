@@ -10,13 +10,17 @@ import { useMediaQuery } from '@vueuse/core'
 import {
   FileCode, Play, Trash2, Upload, Loader2,
   FileUp, XCircle, AlertTriangle, Building2,
-  Plus, GitBranch, RefreshCw, BookOpen,
+  Plus, GitBranch, RefreshCw, BookOpen, Share2,
 } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert'
 import { Separator } from '@/components/ui/separator'
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from '@/components/ui/select'
+import type { KnowledgeGraphResponse, WorkspaceResponse } from '~/types'
 import {
   Tooltip, TooltipContent, TooltipTrigger,
 } from '@/components/ui/tooltip'
@@ -78,11 +82,41 @@ const quickStartTemplates = [
   },
 ]
 
-const { hasTenant } = useTenant()
+const { hasTenant, tenantVersion } = useTenant()
 const { ctrlHeld } = useModifierKeys()
 const submission = useMutationSubmission()
 const router = useRouter()
 const route = useRoute()
+
+// ── Knowledge Graph selector ────────────────────────────────────────────────
+
+const { listWorkspaces } = useIamApi()
+const { listKnowledgeGraphs } = useManagementApi()
+
+const kgWorkspaces = ref<WorkspaceResponse[]>([])
+const kgOptions = ref<KnowledgeGraphResponse[]>([])
+const selectedKgId = ref<string>('')
+
+async function fetchKgOptions() {
+  try {
+    const wsRes = await listWorkspaces()
+    kgWorkspaces.value = wsRes.workspaces
+    const allKgs: KnowledgeGraphResponse[] = []
+    await Promise.all(wsRes.workspaces.map(async (ws) => {
+      try {
+        const kgs = await listKnowledgeGraphs(ws.id)
+        allKgs.push(...kgs)
+      } catch { /* workspace may have no KGs */ }
+    }))
+    kgOptions.value = allKgs
+  } catch { /* non-blocking */ }
+}
+
+watch(tenantVersion, () => {
+  kgOptions.value = []
+  selectedKgId.value = ''
+  if (hasTenant.value) fetchKgOptions()
+})
 
 // ── Worker ─────────────────────────────────────────────────────────────────
 
@@ -253,6 +287,8 @@ const preparing = ref(false)
 async function handleSubmit() {
   if (submitting.value || preparing.value || !editorContent.value.trim()) return
 
+  const kgId = selectedKgId.value || null
+
   // For large files, skip client-side re-parse and submit raw content directly
   if (isLargeFile.value) {
     // Show loading state immediately before expensive string processing
@@ -271,7 +307,7 @@ async function handleSubmit() {
     })
     const body = cleanLines.join('\n')
     preparing.value = false
-    submission.submit(body, opCount)
+    submission.submit(body, opCount, kgId)
     return
   }
 
@@ -289,7 +325,7 @@ async function handleSubmit() {
 
   // Convert parsed operations to clean JSONL for submission
   const jsonlBody = toJsonl(result.operations)
-  submission.submit(jsonlBody, result.operations.length)
+  submission.submit(jsonlBody, result.operations.length, kgId)
 }
 
 function clearEditor() {
@@ -382,6 +418,8 @@ function handleCtrlEnter(e: KeyboardEvent) {
 
 onMounted(() => {
   document.addEventListener('keydown', handleCtrlEnter)
+
+  if (hasTenant.value) fetchKgOptions()
 
   const templateParam = route.query.template
   if (typeof templateParam === 'string' && templateParam.trim()) {
@@ -516,6 +554,26 @@ onBeforeUnmount(() => {
           Tip: You can also drag &amp; drop a .jsonl file anywhere on this page
         </p>
       </div>
+    </div>
+
+    <!-- Knowledge Graph selector -->
+    <div v-if="hasTenant" class="flex items-center gap-3">
+      <Share2 class="size-4 shrink-0 text-muted-foreground" />
+      <span class="text-sm text-muted-foreground shrink-0">Knowledge Graph:</span>
+      <Select v-model="selectedKgId" :disabled="kgOptions.length === 0">
+        <SelectTrigger class="w-64">
+          <SelectValue :placeholder="kgOptions.length === 0 ? 'Default (global graph)' : 'Default (global graph)'" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="">Default (global graph)</SelectItem>
+          <SelectItem v-for="kg in kgOptions" :key="kg.id" :value="kg.id">
+            {{ kg.name }}
+          </SelectItem>
+        </SelectContent>
+      </Select>
+      <span v-if="selectedKgId" class="text-xs text-muted-foreground">
+        Mutations will apply to the selected knowledge graph's AGE graph.
+      </span>
     </div>
 
     <!-- Active state (editor + panels) — mutually exclusive with the empty state above -->

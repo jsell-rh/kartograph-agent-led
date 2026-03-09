@@ -6,7 +6,7 @@ import { Prec, type Extension } from '@codemirror/state'
 import { useLocalStorage } from '@vueuse/core'
 import {
   Terminal, Play, Trash2, Loader2, Clock, Hash,
-  PanelRight, PanelRightClose, Database, Sparkles, BookOpen, Building2,
+  PanelRight, PanelRightClose, Database, Sparkles, BookOpen, Building2, Share2,
 } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -24,7 +24,7 @@ import {
   Sheet, SheetContent, SheetTitle, SheetHeader,
   SheetDescription,
 } from '@/components/ui/sheet'
-import type { CypherResult, HistoryEntry } from '~/types'
+import type { CypherResult, HistoryEntry, KnowledgeGraphResponse, WorkspaceResponse } from '~/types'
 
 // Modifier key tracking
 import { useModifierKeys } from '@/composables/useModifierKeys'
@@ -50,6 +50,8 @@ const { queryGraph } = useQueryApi()
 const { listNodeLabels, listEdgeLabels } = useGraphApi()
 const { extractErrorMessage } = useErrorHandler()
 const { hasTenant, tenantVersion } = useTenant()
+const { listWorkspaces } = useIamApi()
+const { listKnowledgeGraphs } = useManagementApi()
 
 // ── State ──────────────────────────────────────────────────────────────────
 
@@ -65,6 +67,24 @@ const executionTime = ref<number | null>(null)
 const nodeLabels = ref<string[]>([])
 const edgeLabels = ref<string[]>([])
 const schemaLoading = ref(false)
+
+// Knowledge Graph selector
+const kgOptions = ref<KnowledgeGraphResponse[]>([])
+const selectedKgId = ref<string>('')
+
+async function fetchKgOptions() {
+  try {
+    const wsRes = await listWorkspaces()
+    const allKgs: KnowledgeGraphResponse[] = []
+    await Promise.all(wsRes.workspaces.map(async (ws) => {
+      try {
+        const kgs = await listKnowledgeGraphs(ws.id)
+        allKgs.push(...kgs)
+      } catch { /* workspace may have no KGs */ }
+    }))
+    kgOptions.value = allKgs
+  } catch { /* non-blocking */ }
+}
 
 // History
 const HISTORY_KEY = 'kartograph:query-history'
@@ -160,6 +180,7 @@ async function executeQuery() {
       cypherQuery,
       Number(timeout.value),
       Number(maxRows.value),
+      selectedKgId.value || null,
     )
     executionTime.value = Math.round(performance.now() - start)
     result.value = res
@@ -323,7 +344,10 @@ const route = useRoute()
 
 onMounted(() => {
   loadHistory()
-  if (hasTenant.value) fetchSchema()
+  if (hasTenant.value) {
+    fetchSchema()
+    fetchKgOptions()
+  }
   document.addEventListener('keydown', handleCtrlEnter)
   window.addEventListener('resize', onWindowResize)
 
@@ -341,7 +365,10 @@ watch(tenantVersion, () => {
     executionTime.value = null
     nodeLabels.value = []
     edgeLabels.value = []
+    kgOptions.value = []
+    selectedKgId.value = ''
     fetchSchema()
+    fetchKgOptions()
   }
 })
 
@@ -449,6 +476,23 @@ onBeforeUnmount(() => {
               ref="editorContainer"
               class="overflow-hidden rounded-md border border-input [&_.cm-editor]:min-h-[120px] [&_.cm-editor]:max-h-[300px] [&_.cm-editor]:overflow-auto [&_.cm-editor.cm-focused]:ring-1 [&_.cm-editor.cm-focused]:ring-ring"
             />
+
+            <!-- KG selector -->
+            <div class="flex items-center gap-2">
+              <Share2 class="size-4 shrink-0 text-muted-foreground" />
+              <span class="text-sm text-muted-foreground shrink-0">Knowledge Graph:</span>
+              <Select v-model="selectedKgId" :disabled="kgOptions.length === 0">
+                <SelectTrigger class="h-8 w-52">
+                  <SelectValue placeholder="Default (global graph)" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">Default (global graph)</SelectItem>
+                  <SelectItem v-for="kg in kgOptions" :key="kg.id" :value="kg.id">
+                    {{ kg.name }}
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
 
             <!-- Controls bar -->
             <div class="flex items-center justify-between">
