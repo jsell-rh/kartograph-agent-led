@@ -25,6 +25,7 @@ from infrastructure.settings import (
     get_spicedb_settings,
 )
 from infrastructure.version import __version__
+from graph.infrastructure.graph_provisioning_handler import GraphProvisioningHandler
 from iam.infrastructure.outbox import IAMEventTranslator
 from infrastructure.outbox.composite import CompositeEventHandler
 from infrastructure.outbox.spicedb_handler import SpiceDBEventHandler
@@ -134,7 +135,11 @@ async def kartograph_lifespan(app: FastAPI):
             authz=authz,
         )
         handler.register(spicedb_handler, handler_name="iam")
-        # Future: handler.register(management_handler, handler_name="management")
+        # Register graph provisioning handler for KnowledgeGraphCreated events
+        graph_provisioning_handler = GraphProvisioningHandler(
+            session_factory=app.state.write_sessionmaker,
+        )
+        handler.register(graph_provisioning_handler, handler_name="graph_provisioning")
 
         # Create event source for real-time NOTIFY processing
         event_source = PostgresNotifyEventSource(

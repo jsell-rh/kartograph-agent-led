@@ -8,7 +8,9 @@ from collections.abc import Generator
 from functools import lru_cache
 from typing import Annotated
 
-from fastapi import Depends
+from fastapi import Depends, Query
+
+from graph.infrastructure.graph_provisioning_handler import graph_name_for_kg
 
 from graph.application.observability import (
     DefaultGraphServiceProbe,
@@ -55,21 +57,37 @@ def get_schema_service_probe() -> SchemaServiceProbe:
 
 def get_age_graph_client(
     pool: Annotated[ConnectionPool, Depends(get_age_connection_pool)],
+    knowledge_graph_id: str | None = Query(
+        None,
+        description="KnowledgeGraph ID to scope graph operations to a per-tenant AGE graph",
+    ),
 ) -> Generator[AgeGraphClient, None, None]:
     """Get request-scoped AGE graph client.
 
     Each request gets its own client with a connection from the pool.
     Connection is automatically returned to pool on cleanup.
 
+    When knowledge_graph_id is provided, the client is scoped to the
+    per-tenant AGE graph (kg_<knowledge_graph_id>) instead of the
+    default global graph from settings.
+
     Args:
         pool: Application-scoped connection pool
+        knowledge_graph_id: Optional KG ID for per-tenant graph scoping
 
     Yields:
         Connected AgeGraphClient instance
     """
     settings = get_database_settings()
     factory = ConnectionFactory(settings, pool=pool)
-    client = AgeGraphClient(settings, connection_factory=factory)
+    resolved_graph_name = (
+        graph_name_for_kg(knowledge_graph_id)
+        if knowledge_graph_id is not None
+        else settings.graph_name
+    )
+    client = AgeGraphClient(
+        settings, connection_factory=factory, graph_name=resolved_graph_name
+    )
     client.connect()
     try:
         yield client

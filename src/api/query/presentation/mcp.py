@@ -3,12 +3,10 @@
 from typing import Any, Dict
 
 from fastmcp import FastMCP
-from fastmcp.dependencies import Depends
 from fastmcp.server.dependencies import get_http_headers
 
 from infrastructure.mcp_dependencies import validate_mcp_api_key
 from infrastructure.settings import get_settings
-from query.application.services import MCPQueryService
 from query.dependencies import (
     get_git_repository,
     get_mcp_query_service,
@@ -69,9 +67,9 @@ def _filter_internal_properties(data: Any) -> Any:
 @mcp.tool
 def query_graph(
     cypher: str,
+    knowledge_graph_id: str | None = None,
     timeout_seconds: int = 30,
     max_rows: int = 1000,
-    service: MCPQueryService = Depends(get_mcp_query_service),  # type: ignore[arg-type]
 ) -> Dict[str, Any]:
     """Execute a Cypher query against the knowledge graph.
 
@@ -87,6 +85,9 @@ def query_graph(
         cypher: The Cypher query to execute. Must be read-only (no CREATE,
             DELETE, SET, REMOVE, or MERGE). Must return a single column
             (use map syntax for multiple values).
+        knowledge_graph_id: Optional KnowledgeGraph ID to scope the query
+            to a specific tenant's AGE graph. If not provided, queries the
+            default global graph.
         timeout_seconds: Maximum query execution time in seconds.
             Default is 30 seconds. Maximum is 60 seconds.
         max_rows: Maximum number of rows to return. Default is 1000.
@@ -118,17 +119,24 @@ def query_graph(
 
         # Aggregations
         query_graph("MATCH (p:Person) RETURN count(p)")
+
+        # Query a specific tenant's knowledge graph
+        query_graph(
+            "MATCH (n) RETURN n LIMIT 10",
+            knowledge_graph_id="01KGID00000000000000000001"
+        )
     """
 
     # Enforce maximum limits
     timeout_seconds = min(timeout_seconds, 60)
     max_rows = min(max_rows, 10000)
 
-    result = service.execute_cypher_query(
-        query=cypher,
-        timeout_seconds=timeout_seconds,
-        max_rows=max_rows,
-    )
+    with get_mcp_query_service(knowledge_graph_id=knowledge_graph_id) as service:
+        result = service.execute_cypher_query(
+            query=cypher,
+            timeout_seconds=timeout_seconds,
+            max_rows=max_rows,
+        )
 
     if isinstance(result, QueryError):
         return {
