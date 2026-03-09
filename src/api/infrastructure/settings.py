@@ -387,3 +387,35 @@ def get_oidc_settings() -> OIDCSettings:
     Uses lru_cache to ensure settings are only loaded once.
     """
     return OIDCSettings()
+
+
+class ManagementSettings(BaseSettings):
+    """Management context settings.
+
+    Environment variables:
+        KARTOGRAPH_MANAGEMENT_FERNET_KEY: URL-safe base64-encoded 32-byte
+            Fernet key for encrypting DataSource credentials at rest.
+            Generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    """
+
+    model_config = SettingsConfigDict(
+        env_prefix="KARTOGRAPH_MANAGEMENT_",
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+    fernet_key: SecretStr = Field(
+        default=SecretStr(""),
+        description="Fernet key for encrypting DataSource credentials at rest. "
+        "Generate with: Fernet.generate_key().decode()",
+    )
+
+
+@lru_cache
+def get_management_settings() -> ManagementSettings:
+    """Get cached Management settings.
+
+    Uses lru_cache to ensure settings are only loaded once.
+    """
+    return ManagementSettings()

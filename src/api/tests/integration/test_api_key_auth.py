@@ -51,12 +51,15 @@ async def unique_api_key_name() -> str:
 
 @pytest_asyncio.fixture
 async def api_key_secret(
-    async_client, tenant_auth_headers, unique_api_key_name: str
+    async_client, tenant_auth_headers, unique_api_key_name: str, clean_iam_tables
 ) -> str:
     """Create an API key and return the plaintext secret.
 
     Uses JWT auth to create the key, then returns the secret for testing.
     Uses unique name per test run to avoid conflicts.
+
+    Depends on clean_iam_tables to ensure SQL state written by this fixture
+    (api_keys row, outbox entries) is cleaned up after each test.
     """
     response = await async_client.post(
         "/iam/api-keys",
@@ -69,12 +72,14 @@ async def api_key_secret(
 
 @pytest_asyncio.fixture
 async def revoked_api_key_secret(
-    async_client, tenant_auth_headers, unique_api_key_name: str
+    async_client, tenant_auth_headers, unique_api_key_name: str, clean_iam_tables
 ) -> str:
     """Create an API key, revoke it, and return the secret.
 
     Used to test that revoked keys are rejected.
     Uses unique name per test run to avoid conflicts.
+
+    Depends on clean_iam_tables to ensure SQL state is cleaned up after the test.
     """
     # Create the key
     create_response = await async_client.post(
@@ -422,6 +427,7 @@ class TestAPIKeyAuthorizationEnforcement:
         async_client: AsyncClient,
         tenant_auth_headers: dict[str, str],
         process_outbox: Callable[[], Coroutine[Any, Any, None]],
+        clean_iam_tables,
     ):
         """API key owner should be able to revoke their own key.
 
@@ -459,6 +465,7 @@ class TestAPIKeyAuthorizationEnforcement:
         alice_admin_tenant_auth_headers: dict[str, str],
         bob_tenant_auth_headers: dict[str, str],
         process_outbox: Callable[[], Coroutine[Any, Any, None]],
+        clean_iam_tables,
     ):
         """Tenant admin should be able to revoke any key in their tenant.
 
@@ -496,6 +503,7 @@ class TestAPIKeyAuthorizationEnforcement:
         alice_admin_tenant_auth_headers: dict[str, str],
         bob_tenant_auth_headers: dict[str, str],
         process_outbox: Callable[[], Coroutine[Any, Any, None]],
+        clean_iam_tables,
     ):
         """Non-admin tenant member must NOT revoke another user's key.
 
