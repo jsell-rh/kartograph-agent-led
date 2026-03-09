@@ -34,6 +34,7 @@ export function useQueryApi() {
     cypher: string,
     timeoutSeconds?: number,
     maxRows?: number,
+    knowledgeGraphId?: string | null,
   ): Promise<CypherResult> {
     const mcpUrl = config.public.mcpEndpointUrl as string
 
@@ -53,6 +54,7 @@ export function useQueryApi() {
     const args: Record<string, unknown> = { cypher }
     if (timeoutSeconds !== undefined) args.timeout_seconds = timeoutSeconds
     if (maxRows !== undefined) args.max_rows = maxRows
+    if (knowledgeGraphId) args.knowledge_graph_id = knowledgeGraphId
 
     // JSON-RPC 2.0 request calling the MCP `query_graph` tool.
     // For stateless_http=True servers we can skip the initialize
