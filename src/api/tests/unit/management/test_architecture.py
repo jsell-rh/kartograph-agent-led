@@ -221,15 +221,26 @@ class TestManagementBoundedContextIsolation:
     independent deployment and evolution.
     """
 
-    def test_management_does_not_import_iam(self):
-        """Management bounded context should not depend on IAM context.
+    def test_management_inner_layers_do_not_import_iam(self):
+        """Management domain, ports, application, and infrastructure should not
+        depend on IAM context.
 
-        IAM manages authentication and authorization. Management should
-        not couple to IAM's user, tenant, or API key domain objects.
+        IAM manages authentication and authorization. Management core layers
+        must not couple to IAM's user, tenant, or API key domain objects.
+
+        Note: management.presentation and management.dependencies legitimately
+        import iam.dependencies.user for authentication middleware — this is
+        an accepted cross-cutting presentation concern (same as graph.presentation).
+        The inner layers must remain isolated.
         """
         (
-            archrule("management_no_iam")
-            .match("management*")
+            archrule("management_inner_no_iam")
+            .match(
+                "management.domain*",
+                "management.ports*",
+                "management.application*",
+                "management.infrastructure*",
+            )
             .should_not_import("iam*")
             .check("management")
         )

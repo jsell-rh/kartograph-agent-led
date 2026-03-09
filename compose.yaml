@@ -7,8 +7,8 @@ services:
       KEYCLOAK_ADMIN_PASSWORD: admin
       KC_HOSTNAME: localhost
     ports:
-      - "8080:8080"
-      - "9000:9000"
+      - "${KEYCLOAK_PORT:-8080}:8080"
+      - "${KEYCLOAK_HEALTH_PORT:-9000}:9000"
     networks:
       - kartograph
     volumes:
@@ -30,7 +30,7 @@ services:
     env_file:
       - env/spicedb.env
     ports:
-      - "50051:50051"
+      - "${SPICEDB_PORT:-50051}:50051"
     networks:
       - kartograph
     restart: unless-stopped
@@ -86,7 +86,7 @@ services:
     env_file:
       - env/postgres.env
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     networks:
@@ -140,7 +140,7 @@ services:
     env_file:
       - env/api.env
     ports:
-      - "8000:8000"
+      - "${API_PORT:-8000}:8000"
     networks:
       - kartograph
     volumes:
@@ -182,13 +182,13 @@ services:
       context: ./src/dev-ui
       dockerfile: Dockerfile
     ports:
-      - "3000:3000"
+      - "${DEV_UI_PORT:-3000}:3000"
     networks:
       - kartograph
     environment:
-      - NUXT_PUBLIC_API_BASE_URL=http://localhost:8000
-      - NUXT_PUBLIC_MCP_ENDPOINT_URL=http://localhost:8000/query/mcp
-      - NUXT_PUBLIC_KEYCLOAK_URL=http://localhost:8080
+      - NUXT_PUBLIC_API_BASE_URL=http://localhost:${API_PORT:-8000}
+      - NUXT_PUBLIC_MCP_ENDPOINT_URL=http://localhost:${API_PORT:-8000}/query/mcp
+      - NUXT_PUBLIC_KEYCLOAK_URL=http://localhost:${KEYCLOAK_PORT:-8080}
       - NUXT_PUBLIC_KEYCLOAK_REALM=kartograph
       - NUXT_PUBLIC_KEYCLOAK_CLIENT_ID=kartograph-ui
     depends_on:

@@ -32,5 +32,5 @@ services:
       - HOST=0.0.0.0
     command: ["pnpm", "run", "dev"]
     ports:
-      - "3000:3000"
-      - "24678:24678"
+      - "${DEV_UI_PORT:-3000}:3000"
+      - "${DEV_UI_HMR_PORT:-24678}:24678"

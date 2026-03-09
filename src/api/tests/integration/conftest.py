@@ -263,7 +263,7 @@ async def tenant_auth_headers(
     default_tenant_id: str,
     alice_token: str,
     integration_db_settings: DatabaseSettings,
-) -> dict[str, str]:
+) -> AsyncGenerator[dict[str, str], None]:
     """Auth headers with X-Tenant-ID for integration tests.
 
     Merges the JWT Bearer auth headers with the default tenant's
@@ -277,13 +277,16 @@ async def tenant_auth_headers(
     This allows workspace integration tests to work with the new
     authorization enforcement.
 
+    Cleans up all SpiceDB relationships written by this fixture after the
+    test, preventing relationship accumulation across tests.
+
     Args:
         auth_headers: JWT Bearer auth headers
         default_tenant_id: The default tenant's ID
         alice_token: Alice's JWT token (for extracting user_id)
         integration_db_settings: Database settings for querying root workspace
 
-    Returns:
+    Yields:
         Headers dict with both Authorization and X-Tenant-ID
     """
     from jose import jwt as jose_jwt
@@ -326,6 +329,7 @@ async def tenant_auth_headers(
     await engine.dispose()
 
     # Grant alice admin permission on the root workspace
+    workspace_resource = None
     if root_workspace_id:
         workspace_resource = format_resource(ResourceType.WORKSPACE, root_workspace_id)
 
@@ -335,7 +339,28 @@ async def tenant_auth_headers(
             subject=user_subject,
         )
 
-    return {**auth_headers, "X-Tenant-ID": default_tenant_id}
+    yield {**auth_headers, "X-Tenant-ID": default_tenant_id}
+
+    # Teardown: remove SpiceDB relationships written by this fixture to prevent
+    # state pollution across tests.
+    try:
+        await spicedb.delete_relationship(
+            resource=tenant_resource,
+            relation="member",
+            subject=user_subject,
+        )
+    except Exception:
+        pass  # Best-effort; relationship may already be gone
+
+    if workspace_resource:
+        try:
+            await spicedb.delete_relationship(
+                resource=workspace_resource,
+                relation="admin",
+                subject=user_subject,
+            )
+        except Exception:
+            pass  # Best-effort; relationship may already be gone
 
 
 @pytest_asyncio.fixture
@@ -344,12 +369,15 @@ async def bob_tenant_auth_headers(
     default_tenant_id: str,
     bob_token: str,
     integration_db_settings: DatabaseSettings,
-) -> dict[str, str]:
+) -> AsyncGenerator[dict[str, str], None]:
     """Auth headers with X-Tenant-ID for bob in integration tests.
 
     Grants bob 'member' role on the default tenant (NOT admin) so that
     bob can authenticate with a tenant context but will be denied admin
     operations. This is used to test authorization denial scenarios.
+
+    Cleans up all SpiceDB relationships written by this fixture after the
+    test, preventing relationship accumulation across tests.
 
     Args:
         bob_auth_headers: JWT Bearer auth headers for bob
@@ -357,7 +385,7 @@ async def bob_tenant_auth_headers(
         bob_token: Bob's JWT token (for extracting user_id)
         integration_db_settings: Database settings for querying root workspace
 
-    Returns:
+    Yields:
         Headers dict with both Authorization and X-Tenant-ID for bob
     """
     from jose import jwt as jose_jwt
@@ -384,4 +412,67 @@ async def bob_tenant_auth_headers(
         subject=user_subject,
     )
 
-    return {**bob_auth_headers, "X-Tenant-ID": default_tenant_id}
+    yield {**bob_auth_headers, "X-Tenant-ID": default_tenant_id}
+
+    # Teardown: remove SpiceDB relationships written by this fixture.
+    try:
+        await spicedb.delete_relationship(
+            resource=tenant_resource,
+            relation="member",
+            subject=user_subject,
+        )
+    except Exception:
+        pass  # Best-effort; relationship may already be gone
+
+
+@pytest_asyncio.fixture
+async def clean_iam_tables(
+    integration_db_settings: DatabaseSettings,
+) -> AsyncGenerator[None, None]:
+    """Clean all IAM SQL tables before and after each test.
+
+    Provides the same SQL isolation as the iam-subpackage ``clean_iam_data``
+    fixture but is available to all tests in the integration/ directory,
+    including those that live outside the iam/ subdirectory (e.g.
+    test_api_key_auth.py, test_auth_enforcement.py).
+
+    Deletion order respects FK constraints:
+    outbox -> api_keys -> groups -> users -> workspaces (children) ->
+    workspaces (roots, non-default) -> tenants (non-default)
+    """
+    from infrastructure.settings import get_iam_settings
+
+    default_tenant_name = get_iam_settings().default_tenant_name
+
+    async def _cleanup() -> None:
+        engine = create_write_engine(integration_db_settings)
+        sessionmaker = async_sessionmaker(engine, expire_on_commit=False)
+        async with sessionmaker() as session:
+            try:
+                await session.execute(text("DELETE FROM outbox"))
+                await session.execute(text("DELETE FROM api_keys"))
+                await session.execute(text("DELETE FROM groups"))
+                await session.execute(text("DELETE FROM users"))
+                await session.execute(
+                    text("DELETE FROM workspaces WHERE parent_workspace_id IS NOT NULL")
+                )
+                await session.execute(
+                    text(
+                        "DELETE FROM workspaces WHERE tenant_id IN "
+                        "(SELECT id FROM tenants WHERE name != :name)"
+                    ),
+                    {"name": default_tenant_name},
+                )
+                await session.execute(
+                    text("DELETE FROM tenants WHERE name != :name"),
+                    {"name": default_tenant_name},
+                )
+                await session.commit()
+            except Exception:
+                await session.rollback()
+                raise
+        await engine.dispose()
+
+    await _cleanup()
+    yield
+    await _cleanup()

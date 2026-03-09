@@ -11,6 +11,7 @@ from graph.dependencies import get_age_graph_client
 from graph.infrastructure.age_client import AgeGraphClient
 from graph.presentation import routes as graph_routes
 from iam.presentation import router as iam_router
+from management.presentation import router as management_router
 from infrastructure.database.dependencies import (
     close_database_engines,
     init_database_engines,
@@ -25,6 +26,7 @@ from infrastructure.settings import (
     get_spicedb_settings,
 )
 from infrastructure.version import __version__
+from graph.infrastructure.graph_provisioning_handler import GraphProvisioningHandler
 from iam.infrastructure.outbox import IAMEventTranslator
 from infrastructure.outbox.composite import CompositeEventHandler
 from infrastructure.outbox.spicedb_handler import SpiceDBEventHandler
@@ -134,7 +136,11 @@ async def kartograph_lifespan(app: FastAPI):
             authz=authz,
         )
         handler.register(spicedb_handler, handler_name="iam")
-        # Future: handler.register(management_handler, handler_name="management")
+        # Register graph provisioning handler for KnowledgeGraphCreated events
+        graph_provisioning_handler = GraphProvisioningHandler(
+            session_factory=app.state.write_sessionmaker,
+        )
+        handler.register(graph_provisioning_handler, handler_name="graph_provisioning")
 
         # Create event source for real-time NOTIFY processing
         event_source = PostgresNotifyEventSource(
@@ -209,6 +215,9 @@ app.include_router(graph_routes.router)
 
 # Include IAM bounded context routes
 app.include_router(iam_router)
+
+# Include Management bounded context routes
+app.include_router(management_router)
 
 # Include dev utility routes (easy to remove for production)
 app.include_router(dev_routes.router)

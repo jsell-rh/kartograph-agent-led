@@ -42,22 +42,39 @@ def get_query_service_probe() -> QueryServiceProbe:
 
 
 @contextmanager
-def mcp_graph_client_context() -> Generator["AgeGraphClient", None, None]:
+def mcp_graph_client_context(
+    knowledge_graph_id: str | None = None,
+) -> Generator["AgeGraphClient", None, None]:
     """Context manager for MCP graph client lifecycle.
 
     Creates a connected graph client and ensures proper cleanup.
     Uses the shared connection pool for efficiency.
+
+    When knowledge_graph_id is provided, the client is scoped to the
+    per-tenant AGE graph (kg_<knowledge_graph_id>) instead of the
+    default global graph from settings.
+
+    Args:
+        knowledge_graph_id: Optional KG ID for per-tenant graph scoping
 
     Yields:
         Connected AgeGraphClient instance
     """
     # Runtime import to avoid static dependency on Graph infrastructure
     from graph.infrastructure.age_client import AgeGraphClient
+    from graph.infrastructure.graph_provisioning_handler import graph_name_for_kg
 
     pool = get_age_connection_pool()
     settings = get_database_settings()
     factory = ConnectionFactory(settings, pool=pool)
-    client = AgeGraphClient(settings, connection_factory=factory)
+    resolved_graph_name = (
+        graph_name_for_kg(knowledge_graph_id)
+        if knowledge_graph_id is not None
+        else settings.graph_name
+    )
+    client = AgeGraphClient(
+        settings, connection_factory=factory, graph_name=resolved_graph_name
+    )
     client.connect()
     try:
         yield client
@@ -66,7 +83,9 @@ def mcp_graph_client_context() -> Generator["AgeGraphClient", None, None]:
 
 
 @contextmanager
-def get_mcp_query_service() -> Iterator[MCPQueryService]:
+def get_mcp_query_service(
+    knowledge_graph_id: str | None = None,
+) -> Iterator[MCPQueryService]:
     """Get MCPQueryService for MCP operations.
 
     Context manager that manually resolves all dependencies to work with
@@ -77,7 +96,7 @@ def get_mcp_query_service() -> Iterator[MCPQueryService]:
     Yields:
         MCPQueryService instance with active database connection
     """
-    with mcp_graph_client_context() as client:
+    with mcp_graph_client_context(knowledge_graph_id=knowledge_graph_id) as client:
         probe = get_query_service_probe()
         repository = QueryGraphRepository(client=client)
         yield MCPQueryService(repository=repository, probe=probe)
