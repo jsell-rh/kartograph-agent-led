@@ -52,6 +52,9 @@ KARTOGRAPH_DB_PORT = { value = "5432", skip_if_set = true }
 KARTOGRAPH_DB_DATABASE = { value = "kartograph", skip_if_set = true }
 KARTOGRAPH_DB_USERNAME = { value = "kartograph", skip_if_set = true }
 KARTOGRAPH_DB_PASSWORD = { value = "kartograph_dev_password", skip_if_set = true }
+# Disable SSL in test environment — asyncpg ssl="prefer" triggers ssl.SSLError (_ssl.c:3076)
+# on Python 3.12 + OpenSSL. Test PostgreSQL doesn't require SSL.
+KARTOGRAPH_DB_SSL_MODE = { value = "disable", skip_if_set = true }
 
 # SpiceDB settings for integration tests
 SPICEDB_ENDPOINT = { value = "localhost:50051", skip_if_set = true }
