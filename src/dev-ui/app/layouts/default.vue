@@ -28,6 +28,7 @@ import {
   Cable,
   Plug,
   Settings2,
+  Activity,
 } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
@@ -191,6 +192,7 @@ const navSections: NavSection[] = [
     items: [
       { label: 'Knowledge Graphs', icon: Share2, to: '/knowledge-graphs' },
       { label: 'Data Sources', icon: Cable, to: '/data-sources' },
+      { label: 'Sync Jobs', icon: Activity, to: '/sync-jobs' },
     ],
   },
   {
@@ -233,6 +235,7 @@ const breadcrumbs = computed(() => {
     '/integrate/mcp': 'MCP Integration',
     '/knowledge-graphs': 'Knowledge Graphs',
     '/data-sources': 'Data Sources',
+    '/sync-jobs': 'Sync Jobs',
   }
 
   if (path !== '/' && routeLabels[path]) {
