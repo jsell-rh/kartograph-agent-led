@@ -25,6 +25,12 @@ import {
   Tooltip, TooltipContent, TooltipTrigger,
 } from '@/components/ui/tooltip'
 import type { KnowledgeGraphResponse, DataSourceResponse, WorkspaceResponse } from '~/types'
+import {
+  validateGitHubAdapter,
+  hasGitHubErrors,
+  buildGitHubConnectionConfig,
+  buildGitHubCredentials,
+} from '~/utils/data-source-forms'
 
 const { listDataSources, createDataSource, deleteDataSource, listKnowledgeGraphs } = useManagementApi()
 const { listWorkspaces } = useIamApi()
@@ -135,37 +141,26 @@ function openCreateDialog() {
 }
 
 async function handleCreate() {
-  githubOwnerError.value = ''
-  githubRepoError.value = ''
-  githubTokenError.value = ''
-
   if (!createName.value.trim() || !selectedKgId.value) return
 
-  const connectionConfig: Record<string, string> = {}
-  const credentials: Record<string, string> = {}
+  let connectionConfig: Record<string, string> = {}
+  let credentials: Record<string, string> | undefined
 
   if (createAdapterType.value === 'github') {
-    let valid = true
-    if (!githubOwner.value.trim()) {
-      githubOwnerError.value = 'GitHub owner is required'
-      valid = false
+    const fields = {
+      owner: githubOwner.value,
+      repo: githubRepo.value,
+      branch: githubBranch.value,
+      token: githubToken.value,
     }
-    if (!githubRepo.value.trim()) {
-      githubRepoError.value = 'Repository name is required'
-      valid = false
-    }
-    if (!githubToken.value.trim()) {
-      githubTokenError.value = 'Personal Access Token is required'
-      valid = false
-    }
-    if (!valid) return
+    const errors = validateGitHubAdapter(fields)
+    githubOwnerError.value = errors.owner
+    githubRepoError.value = errors.repo
+    githubTokenError.value = errors.token
+    if (hasGitHubErrors(errors)) return
 
-    connectionConfig.owner = githubOwner.value.trim()
-    connectionConfig.repo = githubRepo.value.trim()
-    if (githubBranch.value.trim()) {
-      connectionConfig.branch = githubBranch.value.trim()
-    }
-    credentials.token = githubToken.value.trim()
+    connectionConfig = buildGitHubConnectionConfig(fields)
+    credentials = buildGitHubCredentials(fields)
   }
 
   creating.value = true
@@ -174,7 +169,7 @@ async function handleCreate() {
       name: createName.value.trim(),
       adapter_type: createAdapterType.value,
       connection_config: connectionConfig,
-      credentials: Object.keys(credentials).length > 0 ? credentials : undefined,
+      credentials,
     })
     toast.success('Data source created')
     await fetchDataSources()
