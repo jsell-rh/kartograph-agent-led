@@ -65,13 +65,17 @@ class FernetCredentialStore(ISecretStoreRepository, ICredentialReader):
     def credential_path_for(data_source_id: str) -> str:
         """Return the canonical credential path for a DataSource.
 
+        Delegates to the port-layer helper to keep path logic in one place.
+
         Args:
             data_source_id: The DataSource ID (ULID string).
 
         Returns:
             Path string: ``datasource/{data_source_id}/credentials``
         """
-        return f"datasource/{data_source_id}/credentials"
+        from management.ports.secret_store import credential_path_for
+
+        return credential_path_for(data_source_id)
 
     # ------------------------------------------------------------------
     # Internal encryption helpers

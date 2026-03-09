@@ -14,6 +14,22 @@ from __future__ import annotations
 from typing import Protocol, runtime_checkable
 
 
+def credential_path_for(data_source_id: str) -> str:
+    """Return the canonical credential path for a DataSource.
+
+    Centralised here (in the port layer) so both the application layer and
+    infrastructure implementations agree on path structure without creating
+    an upward dependency.
+
+    Args:
+        data_source_id: The DataSource ID (ULID string).
+
+    Returns:
+        Path string: ``datasource/{data_source_id}/credentials``
+    """
+    return f"datasource/{data_source_id}/credentials"
+
+
 @runtime_checkable
 class ISecretStoreRepository(Protocol):
     """Full read/write port for encrypted credential storage.
