@@ -89,6 +89,21 @@ export interface DataSourceResponse {
   schedule_value: string | null
 }
 
+// ── Ingestion Types ────────────────────────────────────────────────────────
+
+export interface SyncJobResponse {
+  id: string
+  knowledge_graph_id: string
+  data_source_id: string
+  tenant_id: string
+  adapter_type: string
+  status: 'pending' | 'running' | 'completed' | 'failed'
+  created_at: string
+  updated_at: string
+  job_package_id: string | null
+  error_message: string | null
+}
+
 // ── Graph Types ────────────────────────────────────────────────────────────
 
 export interface NodeRecord {
