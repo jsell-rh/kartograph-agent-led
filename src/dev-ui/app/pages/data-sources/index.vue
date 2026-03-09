@@ -2,7 +2,7 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { toast } from 'vue-sonner'
 import {
-  Cable, Plus, Trash2, Loader2, Building2, ShieldCheck, ShieldOff,
+  Cable, Plus, Trash2, Loader2, Building2, ShieldCheck, ShieldOff, Eye, EyeOff, Info,
 } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -21,6 +21,9 @@ import {
 } from '@/components/ui/table'
 import { Card, CardContent } from '@/components/ui/card'
 import { Alert, AlertDescription } from '@/components/ui/alert'
+import {
+  Tooltip, TooltipContent, TooltipTrigger,
+} from '@/components/ui/tooltip'
 import type { KnowledgeGraphResponse, DataSourceResponse, WorkspaceResponse } from '~/types'
 
 const { listDataSources, createDataSource, deleteDataSource, listKnowledgeGraphs } = useManagementApi()
@@ -46,11 +49,17 @@ const loading = ref(false)
 const showCreateDialog = ref(false)
 const createName = ref('')
 const createAdapterType = ref('github')
-const createConnectionConfig = ref('')
-const createCredentials = ref('')
 const creating = ref(false)
-const createConfigError = ref('')
-const createCredError = ref('')
+
+// GitHub adapter fields
+const githubOwner = ref('')
+const githubRepo = ref('')
+const githubBranch = ref('')
+const githubToken = ref('')
+const githubTokenVisible = ref(false)
+const githubOwnerError = ref('')
+const githubRepoError = ref('')
+const githubTokenError = ref('')
 
 // Delete dialog
 const showDeleteDialog = ref(false)
@@ -114,52 +123,58 @@ async function fetchDataSources() {
 function openCreateDialog() {
   createName.value = ''
   createAdapterType.value = 'github'
-  createConnectionConfig.value = ''
-  createCredentials.value = ''
-  createConfigError.value = ''
-  createCredError.value = ''
+  githubOwner.value = ''
+  githubRepo.value = ''
+  githubBranch.value = ''
+  githubToken.value = ''
+  githubTokenVisible.value = false
+  githubOwnerError.value = ''
+  githubRepoError.value = ''
+  githubTokenError.value = ''
   showCreateDialog.value = true
 }
 
-function parseJsonField(value: string): Record<string, string> | null {
-  const trimmed = value.trim()
-  if (!trimmed) return {}
-  try {
-    return JSON.parse(trimmed)
-  } catch {
-    return null
-  }
-}
-
 async function handleCreate() {
-  createConfigError.value = ''
-  createCredError.value = ''
-
-  const connectionConfig = parseJsonField(createConnectionConfig.value)
-  if (connectionConfig === null) {
-    createConfigError.value = 'Must be valid JSON object or empty'
-    return
-  }
-
-  let credentials: Record<string, string> | null = null
-  const credTrimmed = createCredentials.value.trim()
-  if (credTrimmed) {
-    const parsed = parseJsonField(credTrimmed)
-    if (parsed === null) {
-      createCredError.value = 'Must be valid JSON object or empty'
-      return
-    }
-    credentials = parsed
-  }
+  githubOwnerError.value = ''
+  githubRepoError.value = ''
+  githubTokenError.value = ''
 
   if (!createName.value.trim() || !selectedKgId.value) return
+
+  const connectionConfig: Record<string, string> = {}
+  const credentials: Record<string, string> = {}
+
+  if (createAdapterType.value === 'github') {
+    let valid = true
+    if (!githubOwner.value.trim()) {
+      githubOwnerError.value = 'GitHub owner is required'
+      valid = false
+    }
+    if (!githubRepo.value.trim()) {
+      githubRepoError.value = 'Repository name is required'
+      valid = false
+    }
+    if (!githubToken.value.trim()) {
+      githubTokenError.value = 'Personal Access Token is required'
+      valid = false
+    }
+    if (!valid) return
+
+    connectionConfig.owner = githubOwner.value.trim()
+    connectionConfig.repo = githubRepo.value.trim()
+    if (githubBranch.value.trim()) {
+      connectionConfig.branch = githubBranch.value.trim()
+    }
+    credentials.token = githubToken.value.trim()
+  }
+
   creating.value = true
   try {
     await createDataSource(selectedKgId.value, {
       name: createName.value.trim(),
       adapter_type: createAdapterType.value,
       connection_config: connectionConfig,
-      credentials: credentials ?? undefined,
+      credentials: Object.keys(credentials).length > 0 ? credentials : undefined,
     })
     toast.success('Data source created')
     await fetchDataSources()
@@ -392,32 +407,84 @@ watch(selectedKgId, (id) => {
             </Select>
           </div>
 
-          <div class="space-y-1.5">
-            <Label for="ds-config">Connection Config (JSON)</Label>
-            <Input
-              id="ds-config"
-              v-model="createConnectionConfig"
-              placeholder='{"owner": "my-org", "repo": "my-repo"}'
-            />
-            <p v-if="createConfigError" class="text-sm text-destructive">{{ createConfigError }}</p>
-            <p class="text-xs text-muted-foreground">Adapter-specific settings (no secrets). Leave empty for {}</p>
-          </div>
+          <!-- GitHub adapter fields -->
+          <template v-if="createAdapterType === 'github'">
+            <div class="space-y-1.5">
+              <Label for="ds-gh-owner">
+                GitHub Owner <span class="text-destructive">*</span>
+              </Label>
+              <Input
+                id="ds-gh-owner"
+                v-model="githubOwner"
+                placeholder="my-org"
+              />
+              <p v-if="githubOwnerError" class="text-sm text-destructive">{{ githubOwnerError }}</p>
+              <p class="text-xs text-muted-foreground">GitHub organization or username (e.g. <code>my-org</code>)</p>
+            </div>
 
-          <div class="space-y-1.5">
-            <Label for="ds-creds">Credentials (JSON)</Label>
-            <Input
-              id="ds-creds"
-              v-model="createCredentials"
-              type="password"
-              placeholder='{"token": "ghp_..."}'
-            />
-            <p v-if="createCredError" class="text-sm text-destructive">{{ createCredError }}</p>
-            <Alert v-if="createCredentials.trim()" class="mt-1">
-              <AlertDescription class="text-xs">
-                Credentials are encrypted with Fernet before storage and never returned by the API.
-              </AlertDescription>
-            </Alert>
-          </div>
+            <div class="space-y-1.5">
+              <Label for="ds-gh-repo">
+                Repository <span class="text-destructive">*</span>
+              </Label>
+              <Input
+                id="ds-gh-repo"
+                v-model="githubRepo"
+                placeholder="my-repo"
+              />
+              <p v-if="githubRepoError" class="text-sm text-destructive">{{ githubRepoError }}</p>
+              <p class="text-xs text-muted-foreground">Repository name without the owner prefix (e.g. <code>my-repo</code>)</p>
+            </div>
+
+            <div class="space-y-1.5">
+              <Label for="ds-gh-branch">Branch</Label>
+              <Input
+                id="ds-gh-branch"
+                v-model="githubBranch"
+                placeholder="main"
+              />
+              <p class="text-xs text-muted-foreground">Branch to index. Defaults to the repository's default branch if empty.</p>
+            </div>
+
+            <div class="space-y-1.5">
+              <div class="flex items-center gap-1.5">
+                <Label for="ds-gh-token">
+                  Personal Access Token <span class="text-destructive">*</span>
+                </Label>
+                <Tooltip>
+                  <TooltipTrigger as-child>
+                    <Info class="size-3.5 text-muted-foreground cursor-help" />
+                  </TooltipTrigger>
+                  <TooltipContent class="max-w-xs">
+                    A GitHub PAT with <code>repo</code> scope (or <code>public_repo</code> for public repos).
+                    Create one at GitHub → Settings → Developer settings → Personal access tokens.
+                  </TooltipContent>
+                </Tooltip>
+              </div>
+              <div class="flex gap-2">
+                <Input
+                  id="ds-gh-token"
+                  v-model="githubToken"
+                  :type="githubTokenVisible ? 'text' : 'password'"
+                  placeholder="ghp_••••••••••••••••••••"
+                  class="flex-1"
+                />
+                <button
+                  type="button"
+                  class="inline-flex items-center justify-center rounded-md border border-input bg-background px-2.5 text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                  :aria-label="githubTokenVisible ? 'Hide token' : 'Show token'"
+                  @click="githubTokenVisible = !githubTokenVisible"
+                >
+                  <component :is="githubTokenVisible ? EyeOff : Eye" class="size-4" />
+                </button>
+              </div>
+              <p v-if="githubTokenError" class="text-sm text-destructive">{{ githubTokenError }}</p>
+              <Alert class="mt-1">
+                <AlertDescription class="text-xs">
+                  Your token is encrypted before storage and never returned by the API.
+                </AlertDescription>
+              </Alert>
+            </div>
+          </template>
         </div>
         <DialogFooter>
           <DialogClose as-child>
