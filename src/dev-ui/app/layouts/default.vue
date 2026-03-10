@@ -30,6 +30,7 @@ import {
   Settings2,
   Activity,
   Wand2,
+  Layers,
 } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
@@ -94,7 +95,7 @@ const userId = computed(() => {
 const avatarInitials = computed(() => {
   const name = displayName.value
   const parts = name.split(/\s+/)
-  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase()
+  if (parts.length >= 2) return ((parts[0]?.[0] ?? '') + (parts[1]?.[0] ?? '')).toUpperCase()
   return name.substring(0, 2).toUpperCase()
 })
 
@@ -160,6 +161,67 @@ watch(isAuthenticated, (authenticated) => {
     fetchTenants()
   }
 }, { immediate: true })
+
+// ── KG Context (global workspace + KG selector) ────────────────────────────
+const { listWorkspaces } = useIamApi()
+const { listKnowledgeGraphs } = useManagementApi()
+const {
+  currentWorkspaceId,
+  currentKgId,
+  currentKgName,
+  workspaces: kgWorkspaces,
+  kgs,
+  workspacesLoading: kgWsLoading,
+  kgsLoading,
+  kgsLoaded,
+  switchWorkspace: switchKgWorkspace,
+  switchKg,
+  reconcileWorkspaces: reconcileKgWorkspaces,
+  reconcileKgs,
+} = useCurrentKg()
+
+async function loadKgWorkspaces() {
+  if (!hasTenant.value) return
+  kgWsLoading.value = true
+  try {
+    const res = await listWorkspaces()
+    reconcileKgWorkspaces(res.workspaces)
+  } catch {
+    // non-blocking
+  } finally {
+    kgWsLoading.value = false
+  }
+}
+
+async function loadKgsForWorkspace(wsId: string) {
+  if (!wsId) return
+  kgsLoading.value = true
+  try {
+    const fetched = await listKnowledgeGraphs(wsId)
+    reconcileKgs(fetched)
+  } catch {
+    reconcileKgs([])
+  } finally {
+    kgsLoading.value = false
+  }
+}
+
+// Load workspaces whenever tenant changes
+watch(hasTenant, (has) => {
+  if (has) loadKgWorkspaces()
+}, { immediate: true })
+
+// Load KGs whenever workspace changes
+watch(currentWorkspaceId, (wsId) => {
+  if (wsId) loadKgsForWorkspace(wsId)
+}, { immediate: false })
+
+function handleKgSwitch(wsId: string, kgId: string, kgName: string) {
+  if (wsId !== currentWorkspaceId.value) {
+    switchKgWorkspace(wsId)
+  }
+  switchKg(kgId, kgName)
+}
 
 // ── Navigation (Token 2 + Token 6) ────────────────────────────────────────
 
@@ -421,6 +483,97 @@ const sidebarWidth = computed(() => (isCollapsed.value ? 'w-16' : 'w-64'))
           </DropdownMenu>
         </div>
 
+        <!-- KG Context Selector (Desktop Sidebar) -->
+        <div v-if="hasTenant" class="border-b border-sidebar-border px-2 py-2">
+          <!-- Loading -->
+          <div
+            v-if="kgWsLoading || kgsLoading"
+            class="flex items-center gap-2 rounded-md px-2 py-2"
+            :class="isCollapsed ? 'justify-center' : ''"
+          >
+            <Tooltip v-if="isCollapsed">
+              <TooltipTrigger as-child>
+                <Loader2 class="size-4 animate-spin text-muted-foreground" />
+              </TooltipTrigger>
+              <TooltipContent side="right" :side-offset="8">Loading knowledge graphs...</TooltipContent>
+            </Tooltip>
+            <template v-else>
+              <Loader2 class="size-4 animate-spin text-muted-foreground" />
+              <span class="text-xs text-muted-foreground">Loading KGs...</span>
+            </template>
+          </div>
+
+          <!-- No KGs -->
+          <NuxtLink
+            v-else-if="kgsLoaded && kgs.length === 0"
+            to="/knowledge-graphs"
+            class="flex items-center gap-2 rounded-md px-2 py-1.5 text-xs text-muted-foreground hover:bg-sidebar-accent/50 transition-colors"
+            :class="isCollapsed ? 'justify-center' : ''"
+          >
+            <Tooltip v-if="isCollapsed">
+              <TooltipTrigger as-child>
+                <Layers class="size-4" />
+              </TooltipTrigger>
+              <TooltipContent side="right" :side-offset="8">No KGs — create one</TooltipContent>
+            </Tooltip>
+            <template v-else>
+              <Layers class="size-4 shrink-0" />
+              <span class="truncate">No knowledge graphs</span>
+            </template>
+          </NuxtLink>
+
+          <!-- KG picker dropdown -->
+          <DropdownMenu v-else-if="kgs.length > 0">
+            <Tooltip v-if="isCollapsed">
+              <TooltipTrigger as-child>
+                <DropdownMenuTrigger as-child>
+                  <button class="flex w-full items-center justify-center rounded-md p-2 transition-colors hover:bg-sidebar-accent/50 focus-visible:outline-none">
+                    <Layers class="size-4 text-sidebar-primary" />
+                  </button>
+                </DropdownMenuTrigger>
+              </TooltipTrigger>
+              <TooltipContent side="right" :side-offset="8">
+                KG: {{ currentKgName ?? 'Select...' }}
+              </TooltipContent>
+            </Tooltip>
+            <DropdownMenuTrigger v-else as-child>
+              <button class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-sidebar-accent/50 focus-visible:outline-none">
+                <Layers class="size-4 shrink-0 text-sidebar-primary" />
+                <span class="flex-1 truncate text-xs font-medium text-sidebar-foreground">
+                  {{ currentKgName ?? 'Select KG...' }}
+                </span>
+                <ChevronsUpDown class="size-3.5 shrink-0 text-sidebar-foreground/50" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent class="w-64" :side="isCollapsed ? 'right' : 'bottom'" align="start" :side-offset="isCollapsed ? 8 : 4">
+              <DropdownMenuLabel class="text-xs text-muted-foreground">Active Knowledge Graph</DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              <template v-for="ws in kgWorkspaces" :key="ws.id">
+                <DropdownMenuLabel class="px-2 py-1 text-[10px] uppercase tracking-wider text-muted-foreground/70">
+                  {{ ws.name }}{{ ws.is_root ? ' (Root)' : '' }}
+                </DropdownMenuLabel>
+                <DropdownMenuItem
+                  v-for="kg in kgs.filter(k => k.workspace_id === ws.id)"
+                  :key="kg.id"
+                  class="flex items-center gap-2 pl-4"
+                  @click="handleKgSwitch(ws.id, kg.id, kg.name)"
+                >
+                  <Layers class="size-4 shrink-0 text-muted-foreground" />
+                  <span class="flex-1 truncate text-sm">{{ kg.name }}</span>
+                  <Check v-if="kg.id === currentKgId" class="size-4 shrink-0 text-sidebar-primary" />
+                </DropdownMenuItem>
+              </template>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem as-child>
+                <NuxtLink to="/knowledge-graphs" class="flex items-center gap-2">
+                  <Settings2 class="size-4 shrink-0 text-muted-foreground" />
+                  <span>Manage Knowledge Graphs</span>
+                </NuxtLink>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+
         <!-- Navigation -->
         <nav class="flex-1 overflow-y-auto py-3" aria-label="Main navigation">
           <!-- Home item (standalone, above sections) -->
@@ -643,6 +796,40 @@ const sidebarWidth = computed(() => (isCollapsed.value ? 'w-16' : 'w-64'))
                     <span>Manage Tenants</span>
                   </NuxtLink>
                 </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+
+          <!-- KG Context Selector (Mobile Sidebar) -->
+          <div v-if="hasTenant && kgs.length > 0" class="border-b border-sidebar-border px-2 py-2">
+            <DropdownMenu>
+              <DropdownMenuTrigger as-child>
+                <button class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-sidebar-accent/50 focus-visible:outline-none">
+                  <Layers class="size-4 shrink-0 text-sidebar-primary" />
+                  <span class="flex-1 truncate text-xs font-medium text-sidebar-foreground">
+                    {{ currentKgName ?? 'Select KG...' }}
+                  </span>
+                  <ChevronsUpDown class="size-3.5 shrink-0 text-sidebar-foreground/50" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent class="w-64" side="bottom" align="start" :side-offset="4">
+                <DropdownMenuLabel class="text-xs text-muted-foreground">Active Knowledge Graph</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <template v-for="ws in kgWorkspaces" :key="ws.id">
+                  <DropdownMenuLabel class="px-2 py-1 text-[10px] uppercase tracking-wider text-muted-foreground/70">
+                    {{ ws.name }}
+                  </DropdownMenuLabel>
+                  <DropdownMenuItem
+                    v-for="kg in kgs.filter(k => k.workspace_id === ws.id)"
+                    :key="kg.id"
+                    class="flex items-center gap-2 pl-4"
+                    @click="handleKgSwitch(ws.id, kg.id, kg.name)"
+                  >
+                    <Layers class="size-4 shrink-0 text-muted-foreground" />
+                    <span class="flex-1 truncate text-sm">{{ kg.name }}</span>
+                    <Check v-if="kg.id === currentKgId" class="size-4 shrink-0 text-sidebar-primary" />
+                  </DropdownMenuItem>
+                </template>
               </DropdownMenuContent>
             </DropdownMenu>
           </div>

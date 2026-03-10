@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { toast } from 'vue-sonner'
 import {
   RefreshCw, Play, Loader2, Building2, Cable, CheckCircle2, XCircle,
-  Clock, Activity, ChevronDown, ChevronUp,
+  Clock, Activity, ChevronDown, ChevronUp, Layers,
 } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
@@ -16,31 +16,28 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
 import { Card, CardContent } from '@/components/ui/card'
-import type { KnowledgeGraphResponse, DataSourceResponse, SyncJobResponse, WorkspaceResponse } from '~/types'
+import type { DataSourceResponse, SyncJobResponse } from '~/types'
 
-const { listKnowledgeGraphs, listDataSources } = useManagementApi()
+const { listDataSources } = useManagementApi()
 const { listSyncJobs, triggerSync } = useIngestionApi()
-const { listWorkspaces } = useIamApi()
 const { extractErrorMessage } = useErrorHandler()
 const { hasTenant, tenantVersion } = useTenant()
+const { currentKgId, currentKg, kgVersion } = useCurrentKg()
 
 // ── State ──────────────────────────────────────────────────────────────────
 
-const workspaces = ref<WorkspaceResponse[]>([])
-const selectedWorkspaceId = ref<string>('')
-const kgs = ref<KnowledgeGraphResponse[]>([])
-const selectedKgId = ref<string>('')
 const dataSources = ref<DataSourceResponse[]>([])
 const selectedDsId = ref<string>('')
 const syncJobs = ref<SyncJobResponse[]>([])
 
-const workspacesLoading = ref(false)
-const kgsLoading = ref(false)
 const dsLoading = ref(false)
 const jobsLoading = ref(false)
 const triggering = ref(false)
 
 const expandedJobId = ref<string | null>(null)
+
+// Auto-refresh interval (5s when there are running/pending jobs)
+let refreshTimer: ReturnType<typeof setInterval> | null = null
 
 // ── Computed ───────────────────────────────────────────────────────────────
 
@@ -48,8 +45,8 @@ const selectedDs = computed(() =>
   dataSources.value.find(d => d.id === selectedDsId.value),
 )
 
-const selectedKg = computed(() =>
-  kgs.value.find(k => k.id === selectedKgId.value),
+const hasLiveJobs = computed(() =>
+  syncJobs.value.some(j => j.status === 'running' || j.status === 'pending'),
 )
 
 // ── Status helpers ─────────────────────────────────────────────────────────
@@ -92,44 +89,14 @@ function duration(job: SyncJobResponse): string {
 
 // ── Data loading ───────────────────────────────────────────────────────────
 
-async function fetchWorkspaces() {
-  workspacesLoading.value = true
-  try {
-    const res = await listWorkspaces()
-    workspaces.value = res.workspaces
-    if (res.workspaces.length > 0 && !selectedWorkspaceId.value) {
-      selectedWorkspaceId.value = res.workspaces[0].id
-    }
-  } catch (err) {
-    toast.error('Failed to load workspaces', { description: extractErrorMessage(err) })
-  } finally {
-    workspacesLoading.value = false
-  }
-}
-
-async function fetchKgs() {
-  if (!selectedWorkspaceId.value) return
-  kgsLoading.value = true
-  try {
-    kgs.value = await listKnowledgeGraphs(selectedWorkspaceId.value)
-    if (kgs.value.length > 0 && !selectedKgId.value) {
-      selectedKgId.value = kgs.value[0].id
-    }
-  } catch (err) {
-    toast.error('Failed to load knowledge graphs', { description: extractErrorMessage(err) })
-    kgs.value = []
-  } finally {
-    kgsLoading.value = false
-  }
-}
-
 async function fetchDataSources() {
-  if (!selectedKgId.value) return
+  if (!currentKgId.value) return
   dsLoading.value = true
   try {
-    dataSources.value = await listDataSources(selectedKgId.value)
-    if (dataSources.value.length > 0 && !selectedDsId.value) {
-      selectedDsId.value = dataSources.value[0].id
+    dataSources.value = await listDataSources(currentKgId.value)
+    const first = dataSources.value[0]
+    if (first && !selectedDsId.value) {
+      selectedDsId.value = first.id
     }
   } catch (err) {
     toast.error('Failed to load data sources', { description: extractErrorMessage(err) })
@@ -139,34 +106,51 @@ async function fetchDataSources() {
   }
 }
 
-async function fetchSyncJobs() {
+async function fetchSyncJobs(silent = false) {
   if (!selectedDsId.value) return
-  jobsLoading.value = true
+  if (!silent) jobsLoading.value = true
   try {
     syncJobs.value = await listSyncJobs(selectedDsId.value, {
-      knowledgeGraphId: selectedKgId.value || undefined,
+      knowledgeGraphId: currentKgId.value || undefined,
     })
   } catch (err) {
-    toast.error('Failed to load sync jobs', { description: extractErrorMessage(err) })
-    syncJobs.value = []
+    if (!silent) toast.error('Failed to load sync jobs', { description: extractErrorMessage(err) })
+    if (!silent) syncJobs.value = []
   } finally {
-    jobsLoading.value = false
+    if (!silent) jobsLoading.value = false
+  }
+}
+
+// ── Auto-refresh ────────────────────────────────────────────────────────────
+
+function startAutoRefresh() {
+  if (refreshTimer) return
+  refreshTimer = setInterval(() => {
+    if (hasLiveJobs.value) fetchSyncJobs(true)
+  }, 5000)
+}
+
+function stopAutoRefresh() {
+  if (refreshTimer) {
+    clearInterval(refreshTimer)
+    refreshTimer = null
   }
 }
 
 // ── Actions ────────────────────────────────────────────────────────────────
 
 async function handleTrigger() {
-  if (!selectedDs.value || !selectedKgId.value) return
+  if (!selectedDs.value || !currentKgId.value) return
   triggering.value = true
   try {
     const job = await triggerSync(
-      selectedKgId.value,
+      currentKgId.value,
       selectedDs.value.id,
       selectedDs.value.adapter_type,
     )
     toast.success('Sync job triggered', { description: `Job ${job.id} is now PENDING` })
     await fetchSyncJobs()
+    startAutoRefresh()
   } catch (err) {
     toast.error('Failed to trigger sync', { description: extractErrorMessage(err) })
   } finally {
@@ -181,41 +165,33 @@ function toggleExpand(jobId: string) {
 // ── Watchers ───────────────────────────────────────────────────────────────
 
 onMounted(() => {
-  if (hasTenant.value) fetchWorkspaces()
+  if (hasTenant.value && currentKgId.value) fetchDataSources()
 })
 
-watch(tenantVersion, () => {
-  if (hasTenant.value) {
-    syncJobs.value = []
-    dataSources.value = []
-    kgs.value = []
-    workspaces.value = []
-    selectedWorkspaceId.value = ''
-    selectedKgId.value = ''
-    selectedDsId.value = ''
-    fetchWorkspaces()
-  }
+onBeforeUnmount(() => {
+  stopAutoRefresh()
 })
 
-watch(selectedWorkspaceId, (id) => {
-  kgs.value = []
-  selectedKgId.value = ''
+watch([tenantVersion, kgVersion], () => {
   dataSources.value = []
   selectedDsId.value = ''
   syncJobs.value = []
-  if (id) fetchKgs()
-})
-
-watch(selectedKgId, (id) => {
-  dataSources.value = []
-  selectedDsId.value = ''
-  syncJobs.value = []
-  if (id) fetchDataSources()
+  if (hasTenant.value && currentKgId.value) fetchDataSources()
 })
 
 watch(selectedDsId, (id) => {
   syncJobs.value = []
-  if (id) fetchSyncJobs()
+  if (id) {
+    fetchSyncJobs()
+    startAutoRefresh()
+  } else {
+    stopAutoRefresh()
+  }
+})
+
+// Stop auto-refresh when no more live jobs
+watch(hasLiveJobs, (live) => {
+  if (!live) stopAutoRefresh()
 })
 </script>
 
@@ -231,7 +207,7 @@ watch(selectedDsId, (id) => {
         </div>
       </div>
       <div class="flex items-center gap-2">
-        <Button variant="outline" size="sm" :disabled="!selectedDsId || jobsLoading" @click="fetchSyncJobs">
+        <Button variant="outline" size="sm" :disabled="!selectedDsId || jobsLoading" @click="() => fetchSyncJobs()">
           <RefreshCw class="mr-2 size-4" :class="{ 'animate-spin': jobsLoading }" />
           Refresh
         </Button>
@@ -253,53 +229,27 @@ watch(selectedDsId, (id) => {
     </div>
 
     <template v-else>
-      <!-- Selectors row -->
+      <!-- Context row: KG + Data Source selector -->
       <div class="flex flex-wrap items-center gap-4">
-        <!-- Workspace -->
-        <div class="flex items-center gap-2">
-          <Label class="shrink-0 text-sm text-muted-foreground">Workspace</Label>
-          <div v-if="workspacesLoading" class="flex items-center gap-1 text-sm text-muted-foreground">
-            <Loader2 class="size-3.5 animate-spin" />Loading...
-          </div>
-          <Select v-else v-model="selectedWorkspaceId" :disabled="workspaces.length === 0">
-            <SelectTrigger class="w-44">
-              <SelectValue :placeholder="workspaces.length === 0 ? 'No workspaces' : 'Select...'" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem v-for="ws in workspaces" :key="ws.id" :value="ws.id">
-                {{ ws.name }}{{ ws.is_root ? ' (Root)' : '' }}
-              </SelectItem>
-            </SelectContent>
-          </Select>
+        <!-- Active KG indicator -->
+        <div v-if="currentKg" class="flex items-center gap-2 text-sm text-muted-foreground">
+          <Layers class="size-4 shrink-0" />
+          <span>KG: <span class="font-medium text-foreground">{{ currentKg.name }}</span></span>
+        </div>
+        <div v-else class="flex items-center gap-2 text-sm text-muted-foreground">
+          <Layers class="size-4 shrink-0" />
+          <NuxtLink to="/knowledge-graphs" class="text-xs text-primary hover:underline">Select a Knowledge Graph</NuxtLink>
         </div>
 
-        <!-- Knowledge Graph -->
-        <div class="flex items-center gap-2">
-          <Label class="shrink-0 text-sm text-muted-foreground">KG</Label>
-          <div v-if="kgsLoading" class="flex items-center gap-1 text-sm text-muted-foreground">
-            <Loader2 class="size-3.5 animate-spin" />Loading...
-          </div>
-          <Select v-else v-model="selectedKgId" :disabled="!selectedWorkspaceId || kgs.length === 0">
-            <SelectTrigger class="w-44">
-              <SelectValue :placeholder="!selectedWorkspaceId ? 'Select workspace first' : kgs.length === 0 ? 'No KGs' : 'Select...'" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem v-for="kg in kgs" :key="kg.id" :value="kg.id">
-                {{ kg.name }}
-              </SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-
-        <!-- Data Source -->
+        <!-- Data Source selector -->
         <div class="flex items-center gap-2">
           <Label class="shrink-0 text-sm text-muted-foreground">Data Source</Label>
           <div v-if="dsLoading" class="flex items-center gap-1 text-sm text-muted-foreground">
             <Loader2 class="size-3.5 animate-spin" />Loading...
           </div>
-          <Select v-else v-model="selectedDsId" :disabled="!selectedKgId || dataSources.length === 0">
+          <Select v-else v-model="selectedDsId" :disabled="!currentKgId || dataSources.length === 0">
             <SelectTrigger class="w-48">
-              <SelectValue :placeholder="!selectedKgId ? 'Select KG first' : dataSources.length === 0 ? 'No data sources' : 'Select...'" />
+              <SelectValue :placeholder="!currentKgId ? 'Select KG first' : dataSources.length === 0 ? 'No data sources' : 'Select...'" />
             </SelectTrigger>
             <SelectContent>
               <SelectItem v-for="ds in dataSources" :key="ds.id" :value="ds.id">
@@ -308,6 +258,12 @@ watch(selectedDsId, (id) => {
               </SelectItem>
             </SelectContent>
           </Select>
+        </div>
+
+        <!-- Auto-refresh indicator -->
+        <div v-if="hasLiveJobs" class="ml-auto flex items-center gap-1.5 text-xs text-muted-foreground">
+          <div class="size-2 animate-pulse rounded-full bg-green-500" />
+          Auto-refreshing
         </div>
       </div>
 
@@ -324,7 +280,7 @@ watch(selectedDsId, (id) => {
           <div v-else-if="!selectedDsId" class="py-12 text-center text-muted-foreground">
             <Cable class="mx-auto size-12 text-muted-foreground/50" />
             <h3 class="mt-4 text-lg font-semibold">No data source selected</h3>
-            <p class="mt-1 text-sm">Select a workspace, knowledge graph, and data source to view sync jobs.</p>
+            <p class="mt-1 text-sm">Select a data source above to view its sync jobs.</p>
           </div>
 
           <!-- Empty -->
