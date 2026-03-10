@@ -29,10 +29,13 @@ from shared_kernel.mutation_log import (
 
 
 def _stable_id(prefix: str, *parts: str) -> str:
-    """Derive a stable node ID from a prefix and path components."""
+    """Derive a stable node ID from a prefix and path components.
+
+    Format: ``{prefix}:{hexdigest[:16]}``
+    Matches graph domain ID_REGEX: ``^[0-9a-z_]+:[0-9a-f]{16}$``
+    """
     key = ":".join(parts)
-    short_hash = hashlib.sha256(key.encode()).hexdigest()[:8]
-    return f"{prefix}:{short_hash}:{key.replace('/', ':')}"
+    return f"{prefix}:{hashlib.sha256(key.encode()).hexdigest()[:16]}"
 
 
 def _extract_python_records(path: str, content: bytes) -> list[MutationRecord]:
