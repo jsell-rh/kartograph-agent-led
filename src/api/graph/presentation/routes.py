@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException, status
+from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
 from iam.dependencies.user import get_current_user
@@ -29,11 +30,59 @@ from graph.domain.value_objects import (
     TypeDefinition,
 )
 
+
+class CypherQueryRequest(BaseModel):
+    cypher: str
+    timeout_seconds: int = 30
+    max_rows: int = 1000
+    knowledge_graph_id: str | None = None
+
+
 router = APIRouter(
     prefix="/graph",
     tags=["graph"],
     dependencies=[Depends(get_current_user)],
 )
+
+
+@router.post("/query")
+async def execute_cypher_query(body: CypherQueryRequest) -> dict:
+    """Execute a read-only Cypher query against the knowledge graph.
+
+    Accepts Bearer token (JWT) authentication via the standard Authorization header.
+    This endpoint is intended for the dev UI; agents should use the MCP endpoint
+    at /query/mcp with an API key.
+
+    Request body:
+        cypher: Cypher query string (read-only — mutations are rejected)
+        timeout_seconds: Query timeout (default 30)
+        max_rows: Maximum rows to return (default 1000)
+        knowledge_graph_id: Optional KG ID to scope query to a per-tenant graph
+
+    Returns:
+        { "rows": [...], "row_count": int }
+
+    Raises:
+        HTTPException: 422 on mutation attempt or query error
+    """
+    from query.dependencies import get_mcp_query_service
+    from query.domain.value_objects import QueryError
+
+    with get_mcp_query_service(knowledge_graph_id=body.knowledge_graph_id) as svc:
+        result = await run_in_threadpool(
+            svc.execute_cypher_query,
+            query=body.cypher,
+            timeout_seconds=body.timeout_seconds,
+            max_rows=body.max_rows,
+        )
+
+    if isinstance(result, QueryError):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=result.message,
+        )
+
+    return {"rows": result.rows, "row_count": result.row_count}
 
 
 @router.post("/mutations", status_code=status.HTTP_200_OK)
