@@ -24,7 +24,7 @@ import {
   Sheet, SheetContent, SheetTitle, SheetHeader,
   SheetDescription,
 } from '@/components/ui/sheet'
-import type { CypherResult, HistoryEntry, KnowledgeGraphResponse, WorkspaceResponse } from '~/types'
+import type { CypherResult, HistoryEntry } from '~/types'
 
 // Modifier key tracking
 import { useModifierKeys } from '@/composables/useModifierKeys'
@@ -50,8 +50,7 @@ const { queryGraph } = useQueryApi()
 const { listNodeLabels, listEdgeLabels } = useGraphApi()
 const { extractErrorMessage } = useErrorHandler()
 const { hasTenant, tenantVersion } = useTenant()
-const { listWorkspaces } = useIamApi()
-const { listKnowledgeGraphs } = useManagementApi()
+const { currentKgId, kgs: globalKgs } = useCurrentKg()
 
 // ── State ──────────────────────────────────────────────────────────────────
 
@@ -68,23 +67,14 @@ const nodeLabels = ref<string[]>([])
 const edgeLabels = ref<string[]>([])
 const schemaLoading = ref(false)
 
-// Knowledge Graph selector
-const kgOptions = ref<KnowledgeGraphResponse[]>([])
-const selectedKgId = ref<string>('')
+// Knowledge Graph selector — driven by global KG context, allows local override
+const kgOptions = computed(() => globalKgs.value)
+const selectedKgId = ref<string>(currentKgId.value ?? '')
 
-async function fetchKgOptions() {
-  try {
-    const wsRes = await listWorkspaces()
-    const allKgs: KnowledgeGraphResponse[] = []
-    await Promise.all(wsRes.workspaces.map(async (ws) => {
-      try {
-        const kgs = await listKnowledgeGraphs(ws.id)
-        allKgs.push(...kgs)
-      } catch { /* workspace may have no KGs */ }
-    }))
-    kgOptions.value = allKgs
-  } catch { /* non-blocking */ }
-}
+// Keep selector in sync when global context changes
+watch(currentKgId, (id) => {
+  selectedKgId.value = id ?? ''
+})
 
 // History
 const HISTORY_KEY = 'kartograph:query-history'
@@ -346,7 +336,6 @@ onMounted(() => {
   loadHistory()
   if (hasTenant.value) {
     fetchSchema()
-    fetchKgOptions()
   }
   document.addEventListener('keydown', handleCtrlEnter)
   window.addEventListener('resize', onWindowResize)
@@ -365,10 +354,7 @@ watch(tenantVersion, () => {
     executionTime.value = null
     nodeLabels.value = []
     edgeLabels.value = []
-    kgOptions.value = []
-    selectedKgId.value = ''
     fetchSchema()
-    fetchKgOptions()
   }
 })
 

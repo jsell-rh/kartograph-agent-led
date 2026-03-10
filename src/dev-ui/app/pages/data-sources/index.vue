@@ -1,17 +1,14 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { toast } from 'vue-sonner'
 import {
-  Cable, Plus, Trash2, Loader2, Building2, ShieldCheck, ShieldOff, Eye, EyeOff, Info,
+  Cable, Plus, Trash2, Loader2, Building2, ShieldCheck, ShieldOff, Eye, EyeOff, Info, Layers,
 } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
 import { Badge } from '@/components/ui/badge'
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from '@/components/ui/select'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
   DialogFooter, DialogClose,
@@ -24,7 +21,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import {
   Tooltip, TooltipContent, TooltipTrigger,
 } from '@/components/ui/tooltip'
-import type { KnowledgeGraphResponse, DataSourceResponse, WorkspaceResponse } from '~/types'
+import type { DataSourceResponse } from '~/types'
 import {
   validateGitHubAdapter,
   hasGitHubErrors,
@@ -32,23 +29,16 @@ import {
   buildGitHubCredentials,
 } from '~/utils/data-source-forms'
 
-const { listDataSources, createDataSource, deleteDataSource, listKnowledgeGraphs } = useManagementApi()
-const { listWorkspaces } = useIamApi()
+const { listDataSources, createDataSource, deleteDataSource } = useManagementApi()
 const { extractErrorMessage } = useErrorHandler()
 const { hasTenant, tenantVersion } = useTenant()
+const { currentKgId, currentKg, kgVersion } = useCurrentKg()
 
 const ADAPTER_TYPES = ['github'] as const
 
 // ── State ──────────────────────────────────────────────────────────────────
 
-const workspaces = ref<WorkspaceResponse[]>([])
-const selectedWorkspaceId = ref<string>('')
-const kgs = ref<KnowledgeGraphResponse[]>([])
-const selectedKgId = ref<string>('')
 const dataSources = ref<DataSourceResponse[]>([])
-
-const workspacesLoading = ref(false)
-const kgsLoading = ref(false)
 const loading = ref(false)
 
 // Create dialog
@@ -72,50 +62,13 @@ const showDeleteDialog = ref(false)
 const dsToDelete = ref<DataSourceResponse | null>(null)
 const deleting = ref(false)
 
-// ── Computed ───────────────────────────────────────────────────────────────
-
-const selectedKg = computed(() =>
-  kgs.value.find(k => k.id === selectedKgId.value),
-)
-
 // ── Data loading ───────────────────────────────────────────────────────────
 
-async function fetchWorkspaces() {
-  workspacesLoading.value = true
-  try {
-    const res = await listWorkspaces()
-    workspaces.value = res.workspaces
-    if (res.workspaces.length > 0 && !selectedWorkspaceId.value) {
-      selectedWorkspaceId.value = res.workspaces[0].id
-    }
-  } catch (err) {
-    toast.error('Failed to load workspaces', { description: extractErrorMessage(err) })
-  } finally {
-    workspacesLoading.value = false
-  }
-}
-
-async function fetchKgs() {
-  if (!selectedWorkspaceId.value) return
-  kgsLoading.value = true
-  try {
-    kgs.value = await listKnowledgeGraphs(selectedWorkspaceId.value)
-    if (kgs.value.length > 0 && !selectedKgId.value) {
-      selectedKgId.value = kgs.value[0].id
-    }
-  } catch (err) {
-    toast.error('Failed to load knowledge graphs', { description: extractErrorMessage(err) })
-    kgs.value = []
-  } finally {
-    kgsLoading.value = false
-  }
-}
-
 async function fetchDataSources() {
-  if (!selectedKgId.value) return
+  if (!currentKgId.value) return
   loading.value = true
   try {
-    dataSources.value = await listDataSources(selectedKgId.value)
+    dataSources.value = await listDataSources(currentKgId.value)
   } catch (err) {
     toast.error('Failed to load data sources', { description: extractErrorMessage(err) })
     dataSources.value = []
@@ -141,7 +94,7 @@ function openCreateDialog() {
 }
 
 async function handleCreate() {
-  if (!createName.value.trim() || !selectedKgId.value) return
+  if (!createName.value.trim() || !currentKgId.value) return
 
   let connectionConfig: Record<string, string> = {}
   let credentials: Record<string, string> | undefined
@@ -165,7 +118,7 @@ async function handleCreate() {
 
   creating.value = true
   try {
-    await createDataSource(selectedKgId.value, {
+    await createDataSource(currentKgId.value!, {
       name: createName.value.trim(),
       adapter_type: createAdapterType.value,
       connection_config: connectionConfig,
@@ -203,30 +156,12 @@ async function handleDelete() {
 }
 
 onMounted(() => {
-  if (hasTenant.value) fetchWorkspaces()
+  if (hasTenant.value && currentKgId.value) fetchDataSources()
 })
 
-watch(tenantVersion, () => {
-  if (hasTenant.value) {
-    dataSources.value = []
-    kgs.value = []
-    workspaces.value = []
-    selectedWorkspaceId.value = ''
-    selectedKgId.value = ''
-    fetchWorkspaces()
-  }
-})
-
-watch(selectedWorkspaceId, (id) => {
-  kgs.value = []
-  selectedKgId.value = ''
+watch([tenantVersion, kgVersion], () => {
   dataSources.value = []
-  if (id) fetchKgs()
-})
-
-watch(selectedKgId, (id) => {
-  dataSources.value = []
-  if (id) fetchDataSources()
+  if (hasTenant.value && currentKgId.value) fetchDataSources()
 })
 </script>
 
@@ -241,7 +176,7 @@ watch(selectedKgId, (id) => {
           <p class="text-sm text-muted-foreground">Connect data adapters to knowledge graphs</p>
         </div>
       </div>
-      <Button :disabled="!hasTenant || !selectedKgId" @click="openCreateDialog">
+      <Button :disabled="!hasTenant || !currentKgId" @click="openCreateDialog">
         <Plus class="mr-2 size-4" />
         Add Data Source
       </Button>
@@ -257,41 +192,11 @@ watch(selectedKgId, (id) => {
     </div>
 
     <template v-else>
-      <!-- Selectors row -->
-      <div class="flex flex-wrap items-center gap-4">
-        <div class="flex items-center gap-2">
-          <Label class="shrink-0 text-sm text-muted-foreground">Workspace</Label>
-          <div v-if="workspacesLoading" class="flex items-center gap-1 text-sm text-muted-foreground">
-            <Loader2 class="size-3.5 animate-spin" />Loading...
-          </div>
-          <Select v-else v-model="selectedWorkspaceId" :disabled="workspaces.length === 0">
-            <SelectTrigger class="w-52">
-              <SelectValue :placeholder="workspaces.length === 0 ? 'No workspaces' : 'Select workspace...'" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem v-for="ws in workspaces" :key="ws.id" :value="ws.id">
-                {{ ws.name }}{{ ws.is_root ? ' (Root)' : '' }}
-              </SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-
-        <div class="flex items-center gap-2">
-          <Label class="shrink-0 text-sm text-muted-foreground">Knowledge Graph</Label>
-          <div v-if="kgsLoading" class="flex items-center gap-1 text-sm text-muted-foreground">
-            <Loader2 class="size-3.5 animate-spin" />Loading...
-          </div>
-          <Select v-else v-model="selectedKgId" :disabled="!selectedWorkspaceId || kgs.length === 0">
-            <SelectTrigger class="w-52">
-              <SelectValue :placeholder="!selectedWorkspaceId ? 'Select workspace first' : kgs.length === 0 ? 'No knowledge graphs' : 'Select KG...'" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem v-for="kg in kgs" :key="kg.id" :value="kg.id">
-                {{ kg.name }}
-              </SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
+      <!-- Active KG indicator -->
+      <div v-if="currentKg" class="flex items-center gap-2 text-sm text-muted-foreground">
+        <Layers class="size-4 shrink-0" />
+        <span>Knowledge Graph: <span class="font-medium text-foreground">{{ currentKg.name }}</span></span>
+        <NuxtLink to="/knowledge-graphs" class="ml-auto text-xs hover:text-primary underline-offset-2 hover:underline">Switch KG</NuxtLink>
       </div>
 
       <!-- Table -->
@@ -302,10 +207,13 @@ watch(selectedKgId, (id) => {
             Loading data sources...
           </div>
 
-          <div v-else-if="!selectedKgId" class="py-12 text-center text-muted-foreground">
+          <div v-else-if="!currentKgId" class="py-12 text-center text-muted-foreground">
             <Cable class="mx-auto size-12 text-muted-foreground/50" />
             <h3 class="mt-4 text-lg font-semibold">No knowledge graph selected</h3>
-            <p class="mt-1 text-sm">Select a workspace and knowledge graph to view data sources.</p>
+            <p class="mt-1 text-sm">Select a knowledge graph from the sidebar to view data sources.</p>
+            <NuxtLink to="/knowledge-graphs">
+              <Button variant="outline" size="sm" class="mt-4">Go to Knowledge Graphs</Button>
+            </NuxtLink>
           </div>
 
           <div v-else-if="dataSources.length === 0" class="py-12 text-center text-muted-foreground">
@@ -374,7 +282,7 @@ watch(selectedKgId, (id) => {
           <DialogTitle>Add Data Source</DialogTitle>
           <DialogDescription>
             Add a data source to knowledge graph
-            <span class="font-medium">{{ selectedKg?.name }}</span>.
+            <span class="font-medium">{{ currentKg?.name }}</span>.
             Credentials are encrypted at rest and never returned in API responses.
           </DialogDescription>
         </DialogHeader>
