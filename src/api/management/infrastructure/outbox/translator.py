@@ -21,6 +21,7 @@ from management.domain.events import DomainEvent
 from shared_kernel.authorization.types import RelationType, ResourceType
 from shared_kernel.outbox.operations import (
     DeleteRelationship,
+    DeleteRelationshipsByFilter,
     SpiceDBOperation,
     WriteRelationship,
 )
@@ -92,23 +93,41 @@ class ManagementEventTranslator:
     def _translate_knowledge_graph_created(
         self, payload: dict[str, Any]
     ) -> list[SpiceDBOperation]:
-        """KnowledgeGraphCreated → write workspace + tenant relationships."""
-        return [
+        """KnowledgeGraphCreated → write workspace + tenant relationships.
+
+        Also writes a direct ADMIN relationship for the creator when
+        ``created_by`` is present, so the creator can manage the KG
+        even without being a workspace admin.
+        """
+        kg_id = payload["knowledge_graph_id"]
+        ops: list[SpiceDBOperation] = [
             WriteRelationship(
                 resource_type=ResourceType.KNOWLEDGE_GRAPH,
-                resource_id=payload["knowledge_graph_id"],
+                resource_id=kg_id,
                 relation=RelationType.WORKSPACE,
                 subject_type=ResourceType.WORKSPACE,
                 subject_id=payload["workspace_id"],
             ),
             WriteRelationship(
                 resource_type=ResourceType.KNOWLEDGE_GRAPH,
-                resource_id=payload["knowledge_graph_id"],
+                resource_id=kg_id,
                 relation=RelationType.TENANT,
                 subject_type=ResourceType.TENANT,
                 subject_id=payload["tenant_id"],
             ),
         ]
+        created_by = payload.get("created_by")
+        if created_by:
+            ops.append(
+                WriteRelationship(
+                    resource_type=ResourceType.KNOWLEDGE_GRAPH,
+                    resource_id=kg_id,
+                    relation=RelationType.ADMIN,
+                    subject_type=ResourceType.USER,
+                    subject_id=created_by,
+                )
+            )
+        return ops
 
     def _translate_knowledge_graph_updated(
         self, payload: dict[str, Any]
@@ -119,21 +138,31 @@ class ManagementEventTranslator:
     def _translate_knowledge_graph_deleted(
         self, payload: dict[str, Any]
     ) -> list[SpiceDBOperation]:
-        """KnowledgeGraphDeleted → delete workspace + tenant relationships."""
+        """KnowledgeGraphDeleted → delete workspace + tenant relationships.
+
+        Also purges all direct ADMIN grants on the KG via a filter-based
+        delete, cleaning up creator admin tuples written at creation time.
+        """
+        kg_id = payload["knowledge_graph_id"]
         return [
             DeleteRelationship(
                 resource_type=ResourceType.KNOWLEDGE_GRAPH,
-                resource_id=payload["knowledge_graph_id"],
+                resource_id=kg_id,
                 relation=RelationType.WORKSPACE,
                 subject_type=ResourceType.WORKSPACE,
                 subject_id=payload["workspace_id"],
             ),
             DeleteRelationship(
                 resource_type=ResourceType.KNOWLEDGE_GRAPH,
-                resource_id=payload["knowledge_graph_id"],
+                resource_id=kg_id,
                 relation=RelationType.TENANT,
                 subject_type=ResourceType.TENANT,
                 subject_id=payload["tenant_id"],
+            ),
+            DeleteRelationshipsByFilter(
+                resource_type=ResourceType.KNOWLEDGE_GRAPH,
+                resource_id=kg_id,
+                relation=RelationType.ADMIN,
             ),
         ]
 

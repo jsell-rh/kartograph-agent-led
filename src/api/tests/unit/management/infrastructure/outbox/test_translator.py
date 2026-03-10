@@ -17,11 +17,16 @@ import pytest
 
 from management.infrastructure.outbox.translator import ManagementEventTranslator
 from shared_kernel.authorization.types import RelationType, ResourceType
-from shared_kernel.outbox.operations import DeleteRelationship, WriteRelationship
+from shared_kernel.outbox.operations import (
+    DeleteRelationship,
+    DeleteRelationshipsByFilter,
+    WriteRelationship,
+)
 
 
 TENANT_ID = "01ARZCX0P0HZGQP3MZXQQ0NNYY"
 WORKSPACE_ID = "01ARZCX0P0HZGQP3MZXQQ0NNXX"
+CREATOR_ID = "01ARZCX0P0HZGQP3MZXQQ0NNCC"
 KG_ID = "01ARZCX0P0HZGQP3MZXQQ0NNZZ"
 DS_ID = "01ARZCX0P0HZGQP3MZXQQ0NNWW"
 OCCURRED_AT_ISO = "2026-01-08T12:00:00+00:00"
@@ -123,6 +128,94 @@ class TestKnowledgeGraphCreatedTranslation:
         assert tenant_op.subject_type == ResourceType.TENANT
         assert tenant_op.subject_id == TENANT_ID
 
+    def test_writes_creator_admin_relationship_when_created_by_set(self) -> None:
+        """KnowledgeGraphCreated with created_by should write ADMIN relationship for creator."""
+        translator = ManagementEventTranslator()
+        payload = {
+            "knowledge_graph_id": KG_ID,
+            "tenant_id": TENANT_ID,
+            "workspace_id": WORKSPACE_ID,
+            "name": "Graph",
+            "description": "",
+            "occurred_at": OCCURRED_AT_ISO,
+            "created_by": CREATOR_ID,
+        }
+
+        ops = translator.translate("KnowledgeGraphCreated", payload)
+
+        admin_op = next(
+            (
+                op
+                for op in ops
+                if isinstance(op, WriteRelationship)
+                and op.relation == RelationType.ADMIN
+            ),
+            None,
+        )
+        assert admin_op is not None
+        assert admin_op.resource_type == ResourceType.KNOWLEDGE_GRAPH
+        assert admin_op.resource_id == KG_ID
+        assert admin_op.subject_type == ResourceType.USER
+        assert admin_op.subject_id == CREATOR_ID
+
+    def test_writes_three_ops_when_created_by_set(self) -> None:
+        """Should produce workspace + tenant + creator-admin when created_by is present."""
+        translator = ManagementEventTranslator()
+        payload = {
+            "knowledge_graph_id": KG_ID,
+            "tenant_id": TENANT_ID,
+            "workspace_id": WORKSPACE_ID,
+            "name": "Graph",
+            "description": "",
+            "occurred_at": OCCURRED_AT_ISO,
+            "created_by": CREATOR_ID,
+        }
+
+        ops = translator.translate("KnowledgeGraphCreated", payload)
+
+        assert len(ops) == 3
+
+    def test_omits_admin_when_created_by_absent(self) -> None:
+        """Should only write workspace + tenant when created_by is not in payload."""
+        translator = ManagementEventTranslator()
+        payload = {
+            "knowledge_graph_id": KG_ID,
+            "tenant_id": TENANT_ID,
+            "workspace_id": WORKSPACE_ID,
+            "name": "Graph",
+            "description": "",
+            "occurred_at": OCCURRED_AT_ISO,
+        }
+
+        ops = translator.translate("KnowledgeGraphCreated", payload)
+
+        assert len(ops) == 2
+        assert not any(
+            isinstance(op, WriteRelationship) and op.relation == RelationType.ADMIN
+            for op in ops
+        )
+
+    def test_omits_admin_when_created_by_is_none(self) -> None:
+        """Should only write workspace + tenant when created_by is explicitly None."""
+        translator = ManagementEventTranslator()
+        payload = {
+            "knowledge_graph_id": KG_ID,
+            "tenant_id": TENANT_ID,
+            "workspace_id": WORKSPACE_ID,
+            "name": "Graph",
+            "description": "",
+            "occurred_at": OCCURRED_AT_ISO,
+            "created_by": None,
+        }
+
+        ops = translator.translate("KnowledgeGraphCreated", payload)
+
+        assert len(ops) == 2
+        assert not any(
+            isinstance(op, WriteRelationship) and op.relation == RelationType.ADMIN
+            for op in ops
+        )
+
 
 class TestKnowledgeGraphUpdatedTranslation:
     """Tests for KnowledgeGraphUpdated → SpiceDB operations."""
@@ -157,9 +250,34 @@ class TestKnowledgeGraphDeletedTranslation:
 
         ops = translator.translate("KnowledgeGraphDeleted", payload)
 
-        assert len(ops) == 2
+        assert len(ops) == 3
         deletes = [op for op in ops if isinstance(op, DeleteRelationship)]
         assert len(deletes) == 2
+
+    def test_deletes_admin_relationships_by_filter(self) -> None:
+        """KnowledgeGraphDeleted should clean up all admin grants via filter."""
+        translator = ManagementEventTranslator()
+        payload = {
+            "knowledge_graph_id": KG_ID,
+            "tenant_id": TENANT_ID,
+            "workspace_id": WORKSPACE_ID,
+            "occurred_at": OCCURRED_AT_ISO,
+        }
+
+        ops = translator.translate("KnowledgeGraphDeleted", payload)
+
+        admin_filter = next(
+            (
+                op
+                for op in ops
+                if isinstance(op, DeleteRelationshipsByFilter)
+                and op.relation == RelationType.ADMIN
+            ),
+            None,
+        )
+        assert admin_filter is not None
+        assert admin_filter.resource_type == ResourceType.KNOWLEDGE_GRAPH
+        assert admin_filter.resource_id == KG_ID
 
     def test_deletes_workspace_relation(self) -> None:
         translator = ManagementEventTranslator()

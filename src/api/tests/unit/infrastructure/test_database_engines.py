@@ -24,6 +24,7 @@ def mock_db_settings() -> DatabaseSettings:
         database="test_db",
         username="test_user",
         password=SecretStr("test_password"),
+        ssl_mode="prefer",
         pool_min_connections=2,
         pool_max_connections=10,
     )
