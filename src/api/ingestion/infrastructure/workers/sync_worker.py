@@ -236,22 +236,26 @@ class SyncJobWorker:
         if ds is None:
             raise ValueError(f"DataSource {job.data_source_id} not found")
 
-        # Decrypt credentials (may not be stored if token was provided inline)
-        credentials: dict[str, str] = {}
-        if ds.credentials_path:
-            try:
-                async with self._session_factory() as session:
-                    cred_store = FernetCredentialStore(
-                        session=session, fernet_key=self._fernet_key
-                    )
-                    credentials = await cred_store.retrieve(
-                        ds.credentials_path, ds.tenant_id
-                    )
-            except KeyError:
-                pass
+        # Decrypt credentials from the Fernet store
+        if not ds.credentials_path:
+            raise ValueError(
+                f"DataSource {job.data_source_id!r} has no credentials configured — "
+                "cannot authenticate with GitHub"
+            )
+
+        async with self._session_factory() as session:
+            cred_store = FernetCredentialStore(
+                session=session, fernet_key=self._fernet_key
+            )
+            credentials = await cred_store.retrieve(ds.credentials_path, ds.tenant_id)
 
         config = ds.connection_config
-        token = credentials.get("token", credentials.get("github_token", ""))
+        token = credentials.get("token", "")
+        if not token:
+            raise ValueError(
+                f"Credential at {ds.credentials_path!r} does not contain a 'token' key "
+                "— cannot authenticate with GitHub"
+            )
         adapter = GitHubAdapter(
             GitHubConfig(
                 owner=config.get("owner", ""),

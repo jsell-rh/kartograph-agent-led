@@ -261,5 +261,10 @@ class TestDataSourceServiceDelete:
         mock_ds_repository.get_by_id = AsyncMock(return_value=fake_ds)
         mock_authz.check_permission = AsyncMock(return_value=False)
 
+        mock_session_ctx = AsyncMock()
+        mock_session_ctx.__aenter__ = AsyncMock(return_value=None)
+        mock_session_ctx.__aexit__ = AsyncMock(return_value=None)
+        service._session.begin = MagicMock(return_value=mock_session_ctx)
+
         with pytest.raises(UnauthorizedError):
             await service.delete_data_source(ds_id=ds_id.value, user_id="user-xyz")
