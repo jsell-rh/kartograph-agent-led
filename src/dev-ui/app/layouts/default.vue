@@ -211,10 +211,10 @@ watch(hasTenant, (has) => {
   if (has) loadKgWorkspaces()
 }, { immediate: true })
 
-// Load KGs whenever workspace changes
+// Load KGs whenever workspace changes (immediate: true so existing useState value triggers load on mount)
 watch(currentWorkspaceId, (wsId) => {
   if (wsId) loadKgsForWorkspace(wsId)
-}, { immediate: false })
+}, { immediate: true })
 
 function handleKgSwitch(wsId: string, kgId: string, kgName: string) {
   if (wsId !== currentWorkspaceId.value) {
