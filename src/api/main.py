@@ -29,6 +29,9 @@ from infrastructure.settings import (
 from infrastructure.version import __version__
 from graph.infrastructure.graph_provisioning_handler import GraphProvisioningHandler
 from iam.infrastructure.outbox import IAMEventTranslator
+from ingestion.dependencies.services import get_sync_job_repository
+from ingestion.infrastructure.job_package_store import InMemoryJobPackageStore
+from ingestion.infrastructure.workers.sync_worker import SyncJobWorker
 from management.infrastructure.outbox.translator import ManagementEventTranslator
 from infrastructure.outbox.composite import CompositeEventHandler
 from infrastructure.outbox.spicedb_handler import SpiceDBEventHandler
@@ -169,6 +172,22 @@ async def kartograph_lifespan(app: FastAPI):
         await worker.start()
         app.state.outbox_worker = worker
 
+    # Startup: start sync job worker if outbox worker is enabled
+    if outbox_settings.enabled and hasattr(app.state, "write_sessionmaker"):
+        from infrastructure.settings import get_management_settings
+
+        mgmt_settings = get_management_settings()
+        sync_worker = SyncJobWorker(
+            session_factory=app.state.write_sessionmaker,
+            sync_job_repo=get_sync_job_repository(),
+            job_package_store=InMemoryJobPackageStore(),
+            connection_pool=get_age_connection_pool(),
+            db_settings=get_database_settings(),
+            fernet_key=mgmt_settings.fernet_key.get_secret_value(),
+        )
+        await sync_worker.start()
+        app.state.sync_worker = sync_worker
+
     # MCP lifespan - skip if already initialized (e.g., in tests with multiple lifespans)
     if not app.state._mcp_initialized:
         async with mcp_http_app_inner.lifespan(app):
@@ -177,6 +196,10 @@ async def kartograph_lifespan(app: FastAPI):
     else:
         # MCP already initialized in previous lifespan cycle
         yield
+
+    # Shutdown: stop sync job worker
+    if hasattr(app.state, "sync_worker"):
+        await app.state.sync_worker.stop()
 
     # Shutdown: stop outbox worker
     if hasattr(app.state, "outbox_worker"):
