@@ -101,6 +101,10 @@ def get_fernet_credential_store(
 def get_kg_service(
     session: Annotated[AsyncSession, Depends(get_write_session)],
     kg_repo: Annotated[KnowledgeGraphRepository, Depends(get_kg_repository)],
+    ds_repo: Annotated[DataSourceRepository, Depends(get_ds_repository)],
+    credential_store: Annotated[
+        FernetCredentialStore, Depends(get_fernet_credential_store)
+    ],
     authz: Annotated[AuthorizationProvider, Depends(get_spicedb_client)],
     current_user: Annotated[CurrentUser, Depends(get_current_user)],
 ) -> KnowledgeGraphService:
@@ -109,6 +113,8 @@ def get_kg_service(
     Args:
         session: Async write session
         kg_repo: KnowledgeGraph repository
+        ds_repo: DataSource repository for cascade deletion
+        credential_store: Fernet credential store for cascade credential cleanup
         authz: SpiceDB authorization provider
         current_user: Authenticated user with tenant context
 
@@ -120,6 +126,8 @@ def get_kg_service(
         kg_repository=kg_repo,
         authz=authz,
         tenant_id=current_user.tenant_id.value,
+        ds_repository=ds_repo,
+        credential_store=credential_store,
     )
 
 

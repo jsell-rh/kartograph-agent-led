@@ -11,7 +11,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from management.domain.aggregates import KnowledgeGraph
 from management.domain.value_objects import KnowledgeGraphId
 from management.ports.exceptions import UnauthorizedError
-from management.ports.repositories import IKnowledgeGraphRepository
+from management.ports.repositories import (
+    IDataSourceRepository,
+    IKnowledgeGraphRepository,
+)
+from management.ports.secret_store import ISecretStoreRepository
 from shared_kernel.authorization.protocols import AuthorizationProvider
 from shared_kernel.authorization.types import (
     Permission,
@@ -34,6 +38,8 @@ class KnowledgeGraphService:
         kg_repository: IKnowledgeGraphRepository,
         authz: AuthorizationProvider,
         tenant_id: str,
+        ds_repository: IDataSourceRepository | None = None,
+        credential_store: ISecretStoreRepository | None = None,
     ) -> None:
         """Initialize KnowledgeGraphService.
 
@@ -42,11 +48,15 @@ class KnowledgeGraphService:
             kg_repository: Repository for KnowledgeGraph persistence.
             authz: Authorization provider for SpiceDB permission checks.
             tenant_id: The tenant this service is scoped to.
+            ds_repository: DataSource repository for cascade deletion on KG delete.
+            credential_store: Secret store for credential cleanup on cascade deletion.
         """
         self._session = session
         self._kg_repository = kg_repository
         self._authz = authz
         self._tenant_id = tenant_id
+        self._ds_repository = ds_repository
+        self._credential_store = credential_store
 
     async def _check_kg_permission(
         self,
@@ -152,9 +162,10 @@ class KnowledgeGraphService:
     async def delete_knowledge_graph(self, kg_id: str, user_id: str) -> bool:
         """Delete a KnowledgeGraph with MANAGE permission check.
 
-        Retrieves the KG, checks MANAGE permission, marks it for deletion,
-        and persists via the repository (which writes the domain event to
-        the outbox for SpiceDB cleanup).
+        Retrieves the KG, checks MANAGE permission, cascade-deletes all
+        associated DataSources (including their credentials and outbox events),
+        then deletes the KG itself — all within a single transaction so the
+        database FK constraint on data_sources.knowledge_graph_id is satisfied.
 
         Args:
             kg_id: The KnowledgeGraph ID.
@@ -177,6 +188,24 @@ class KnowledgeGraphService:
             )
 
         async with self._session.begin():
+            # Cascade-delete all DataSources before deleting the KG, so the
+            # RESTRICT foreign key constraint on data_sources.knowledge_graph_id
+            # is not violated. Each DS deletion emits a DataSourceDeleted outbox
+            # event for SpiceDB tuple cleanup.
+            if self._ds_repository is not None:
+                data_sources = await self._ds_repository.list_by_knowledge_graph(
+                    knowledge_graph_id=kg_id,
+                    tenant_id=self._tenant_id,
+                )
+                for ds in data_sources:
+                    if self._credential_store is not None and ds.credentials_path:
+                        await self._credential_store.delete(
+                            path=ds.credentials_path,
+                            tenant_id=self._tenant_id,
+                        )
+                    ds.mark_for_deletion(deleted_by=user_id)
+                    await self._ds_repository.delete(ds)
+
             kg.mark_for_deletion(deleted_by=user_id)
             await self._kg_repository.delete(kg)
         return True

@@ -34,6 +34,10 @@ class TestGraphProvisioningHandlerSupportedEventTypes:
         handler = GraphProvisioningHandler(session_factory=MagicMock())
         assert "KnowledgeGraphCreated" in handler.supported_event_types()
 
+    def test_supports_knowledge_graph_deleted(self):
+        handler = GraphProvisioningHandler(session_factory=MagicMock())
+        assert "KnowledgeGraphDeleted" in handler.supported_event_types()
+
     def test_does_not_support_other_events(self):
         handler = GraphProvisioningHandler(session_factory=MagicMock())
         assert "DataSourceCreated" not in handler.supported_event_types()
@@ -147,3 +151,53 @@ class TestGraphProvisioningHandlerHandle:
 
         # No database calls
         session.execute.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_handles_knowledge_graph_deleted(self, mock_session_factory):
+        """Should call drop_graph when KnowledgeGraphDeleted is received."""
+        factory, session = mock_session_factory
+        # Graph exists
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = 1
+        session.execute = AsyncMock(return_value=mock_result)
+
+        handler = GraphProvisioningHandler(session_factory=factory)
+
+        await handler.handle(
+            "KnowledgeGraphDeleted",
+            {
+                "knowledge_graph_id": "01TESTID000000000000000001",
+                "tenant_id": "tenant-123",
+                "workspace_id": "ws-456",
+                "occurred_at": "2026-03-10T00:00:00Z",
+            },
+        )
+
+        # Should have checked existence and dropped the graph
+        assert session.execute.call_count == 2
+        assert session.commit.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_does_not_drop_if_graph_does_not_exist(self, mock_session_factory):
+        """Should skip drop if AGE graph does not exist (idempotent)."""
+        factory, session = mock_session_factory
+        # Graph does not exist
+        mock_result = MagicMock()
+        mock_result.scalar_one_or_none.return_value = None
+        session.execute = AsyncMock(return_value=mock_result)
+
+        handler = GraphProvisioningHandler(session_factory=factory)
+
+        await handler.handle(
+            "KnowledgeGraphDeleted",
+            {
+                "knowledge_graph_id": "01TESTID000000000000000001",
+                "tenant_id": "tenant-123",
+                "workspace_id": "ws-456",
+                "occurred_at": "2026-03-10T00:00:00Z",
+            },
+        )
+
+        # Only existence check, no drop call
+        assert session.execute.call_count == 1
+        assert session.commit.call_count == 0
