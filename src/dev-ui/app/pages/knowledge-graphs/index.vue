@@ -2,7 +2,7 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { toast } from 'vue-sonner'
 import {
-  Share2, Plus, Trash2, Loader2, Building2, ChevronRight,
+  Share2, Plus, Trash2, Loader2, Building2, ChevronRight, Wand2,
 } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -158,10 +158,18 @@ watch(selectedWorkspaceId, (id) => {
           <p class="text-sm text-muted-foreground">Manage per-tenant AGE knowledge graphs</p>
         </div>
       </div>
-      <Button :disabled="!hasTenant || !selectedWorkspaceId" @click="openCreateDialog">
-        <Plus class="mr-2 size-4" />
-        Create Knowledge Graph
-      </Button>
+      <div class="flex items-center gap-2">
+        <NuxtLink to="/knowledge-graphs/setup">
+          <Button variant="outline" :disabled="!hasTenant">
+            <Wand2 class="mr-2 size-4" />
+            Setup Wizard
+          </Button>
+        </NuxtLink>
+        <Button :disabled="!hasTenant || !selectedWorkspaceId" @click="openCreateDialog">
+          <Plus class="mr-2 size-4" />
+          Create Knowledge Graph
+        </Button>
+      </div>
     </div>
 
     <Separator />
@@ -214,10 +222,18 @@ watch(selectedWorkspaceId, (id) => {
             <Share2 class="mx-auto size-12 text-muted-foreground/50" />
             <h3 class="mt-4 text-lg font-semibold">No knowledge graphs</h3>
             <p class="mt-1 text-sm">Create a knowledge graph to scope graph data per tenant.</p>
-            <Button variant="outline" size="sm" class="mt-4" @click="openCreateDialog">
-              <Plus class="mr-2 size-4" />
-              Create Knowledge Graph
-            </Button>
+            <div class="mt-4 flex items-center justify-center gap-2">
+              <NuxtLink to="/knowledge-graphs/setup">
+                <Button size="sm">
+                  <Wand2 class="mr-2 size-4" />
+                  Setup Wizard
+                </Button>
+              </NuxtLink>
+              <Button variant="outline" size="sm" @click="openCreateDialog">
+                <Plus class="mr-2 size-4" />
+                Quick Create
+              </Button>
+            </div>
           </div>
 
           <!-- Table rows -->
