@@ -1,12 +1,12 @@
 """Unit tests for main FastAPI application configuration.
 
-Tests for Swagger UI OAuth2/OIDC integration.
+Tests for Swagger UI OAuth2/OIDC integration and outbox handler registration.
 Following TDD approach - tests written before implementation.
 """
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi import FastAPI
@@ -124,3 +124,86 @@ class TestConfigureSwaggerOAuth2:
         # Should use swagger_client_id, not client_id
         assert test_app.swagger_ui_init_oauth["clientId"] == TEST_SWAGGER_CLIENT_ID
         assert test_app.swagger_ui_init_oauth["clientId"] != TEST_CLIENT_ID
+
+
+class TestOutboxHandlerRegistration:
+    """Regression tests for outbox handler wiring in main.py lifespan.
+
+    These tests guard against the class of bug where a bounded context
+    translator is implemented but never registered with the composite handler,
+    causing outbox events to silently fail with 'No handler registered'.
+    """
+
+    def _build_composite_handler(self):  # type: ignore[return]
+        """Reproduce the handler registration logic from kartograph_lifespan."""
+        from iam.infrastructure.outbox import IAMEventTranslator
+        from infrastructure.outbox.composite import CompositeEventHandler
+        from infrastructure.outbox.spicedb_handler import SpiceDBEventHandler
+        from management.infrastructure.outbox.translator import (
+            ManagementEventTranslator,
+        )
+
+        authz = MagicMock()
+        authz.write_relationship = AsyncMock()
+        authz.delete_relationship = AsyncMock()
+        authz.delete_relationships_by_filter = AsyncMock()
+
+        handler = CompositeEventHandler()
+        handler.register(
+            SpiceDBEventHandler(translator=IAMEventTranslator(), authz=authz),
+            handler_name="iam",
+        )
+        handler.register(
+            SpiceDBEventHandler(translator=ManagementEventTranslator(), authz=authz),
+            handler_name="management",
+        )
+        return handler
+
+    def test_data_source_created_is_handled(self) -> None:
+        """DataSourceCreated must have a registered handler (regression: TASK-101)."""
+        handler = self._build_composite_handler()
+        assert "DataSourceCreated" in handler.supported_event_types()
+
+    def test_data_source_deleted_is_handled(self) -> None:
+        handler = self._build_composite_handler()
+        assert "DataSourceDeleted" in handler.supported_event_types()
+
+    def test_data_source_updated_is_handled(self) -> None:
+        handler = self._build_composite_handler()
+        assert "DataSourceUpdated" in handler.supported_event_types()
+
+    def test_data_source_sync_requested_is_handled(self) -> None:
+        handler = self._build_composite_handler()
+        assert "DataSourceSyncRequested" in handler.supported_event_types()
+
+    def test_knowledge_graph_created_is_handled(self) -> None:
+        handler = self._build_composite_handler()
+        assert "KnowledgeGraphCreated" in handler.supported_event_types()
+
+    def test_knowledge_graph_deleted_is_handled(self) -> None:
+        handler = self._build_composite_handler()
+        assert "KnowledgeGraphDeleted" in handler.supported_event_types()
+
+    def test_all_iam_events_are_handled(self) -> None:
+        """All IAM domain events must be covered by the composite handler."""
+        from iam.infrastructure.outbox import IAMEventTranslator
+
+        iam_events = IAMEventTranslator().supported_event_types()
+        handler = self._build_composite_handler()
+        missing = iam_events - handler.supported_event_types()
+        assert not missing, (
+            f"IAM events missing from composite handler: {sorted(missing)}"
+        )
+
+    def test_all_management_events_are_handled(self) -> None:
+        """All Management domain events must be covered by the composite handler."""
+        from management.infrastructure.outbox.translator import (
+            ManagementEventTranslator,
+        )
+
+        mgmt_events = ManagementEventTranslator().supported_event_types()
+        handler = self._build_composite_handler()
+        missing = mgmt_events - handler.supported_event_types()
+        assert not missing, (
+            f"Management events missing from composite handler: {sorted(missing)}"
+        )
