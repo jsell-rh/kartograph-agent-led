@@ -204,17 +204,19 @@ class DataSourceService:
         Raises:
             UnauthorizedError: If user lacks MANAGE permission.
         """
-        ds = await self._ds_repository.get_by_id(DataSourceId(value=ds_id))
-        if ds is None:
-            return False
-
-        authorized = await self._check_ds_permission(ds_id, user_id, Permission.MANAGE)
-        if not authorized:
-            raise UnauthorizedError(
-                f"User {user_id!r} lacks MANAGE permission on data_source {ds_id!r}"
-            )
-
         async with self._session.begin():
+            ds = await self._ds_repository.get_by_id(DataSourceId(value=ds_id))
+            if ds is None:
+                return False
+
+            authorized = await self._check_ds_permission(
+                ds_id, user_id, Permission.MANAGE
+            )
+            if not authorized:
+                raise UnauthorizedError(
+                    f"User {user_id!r} lacks MANAGE permission on data_source {ds_id!r}"
+                )
+
             # Delete credentials first (before marking aggregate deleted)
             if ds.credentials_path:
                 await self._credential_store.delete(
