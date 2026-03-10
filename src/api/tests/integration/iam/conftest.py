@@ -115,7 +115,7 @@ def spicedb_client() -> AuthorizationProvider:
 async def clean_iam_data(
     async_session: AsyncSession, spicedb_client: AuthorizationProvider
 ) -> AsyncGenerator[None, None]:
-    """Clean IAM tables and SpiceDB relationships before and after tests.
+    """Clean IAM tables AND SpiceDB relationships before and after tests.
 
     Deletes test data while preserving the default tenant and its root workspace.
     Uses domain probe for observability instead of direct logging.
@@ -123,13 +123,76 @@ async def clean_iam_data(
     Deletion order respects FK constraints:
     outbox -> api_keys -> groups -> users -> workspaces (children) ->
     workspaces (roots) -> tenants
+
+    SpiceDB cleanup strategy:
+    - PRE-TEST: SQL only. SpiceDB cleanup is intentionally skipped because
+      fixtures like tenant_auth_headers run before clean_iam_data in pytest's
+      fixture ordering and write relationships (e.g. workspace:admin) that the
+      test needs. Cleaning SpiceDB pre-test would delete those relationships.
+    - POST-TEST: SpiceDB cleanup runs BEFORE SQL. This clears accumulated
+      group/workspace relationships that were written by the outbox worker
+      during the test (not cleaned by the app's own delete events when the
+      test bypasses the API and uses direct SQL deletes).
     """
     default_tenant_name = get_iam_settings().default_tenant_name
     probe = DefaultTestCleanupProbe()
 
-    async def cleanup() -> None:
-        """Perform cleanup with proper FK constraint ordering."""
+    async def _cleanup_spicedb() -> None:
+        """Remove SpiceDB membership relationships accumulated during tests.
+
+        Groups are entirely test-owned — delete all three relations.
+        Workspace structural relations (tenant, parent, creator_tenant) are
+        written at bootstrap and must NOT be deleted: they are required by
+        subsequent tests (e.g. creator_tenant enables tenant members to create
+        child workspaces). Only workspace member relations (admin, editor,
+        member) are cleaned because those are the ones written by the outbox
+        worker during tests and cause cross-test permission assertion failures.
+
+        Relation names match the SpiceDB schema exactly:
+          group:     tenant, admin, member_relation (all — fully test-owned)
+          workspace: admin, editor, member (structural preserved at bootstrap)
+        """
+        # GROUP relations written by outbox (GroupCreated, MemberAdded, etc.)
+        for relation in ("tenant", "admin", "member_relation"):
+            try:
+                await spicedb_client.delete_relationships_by_filter(
+                    resource_type="group",
+                    relation=relation,
+                )
+            except Exception:
+                pass  # Best-effort; no relationships of this type may exist
+
+        # WORKSPACE member relations (admin, editor, member) written by outbox.
+        # Structural relations (tenant, parent, creator_tenant) are NOT cleaned
+        # because they are written at bootstrap and must persist across tests.
+        # Stale structural entries on deleted workspaces are harmless: they
+        # reference non-existent IDs that the DB layer filters out.
+        for relation in ("admin", "editor", "member"):
+            try:
+                await spicedb_client.delete_relationships_by_filter(
+                    resource_type="workspace",
+                    relation=relation,
+                )
+            except Exception:
+                pass  # Best-effort; no relationships of this type may exist
+
+    async def cleanup(*, include_spicedb: bool) -> None:
+        """Perform cleanup with proper FK constraint ordering.
+
+        Args:
+            include_spicedb: When True, clean SpiceDB relationships BEFORE
+                SQL rows. Set False for pre-test cleanup to avoid deleting
+                relationships written by session-level fixtures (e.g.
+                tenant_auth_headers) that run before clean_iam_data in the
+                fixture ordering.
+        """
         probe.cleanup_started(default_tenant_name=default_tenant_name)
+
+        if include_spicedb:
+            # SpiceDB cleanup first: relationships must be removed before SQL
+            # rows disappear to avoid orphaned authorization tuples that cause
+            # non-deterministic failures in subsequent tests.
+            await _cleanup_spicedb()
 
         try:
             # Delete in FK-respecting order
@@ -188,13 +251,15 @@ async def clean_iam_data(
             await async_session.rollback()
             raise  # Re-raise to make test failures visible
 
-    # Clean before test
-    await cleanup()
+    # Pre-test: SQL only. SpiceDB cleanup is skipped here because fixtures
+    # like tenant_auth_headers may run before clean_iam_data in the fixture
+    # ordering and would have their freshly-written relationships deleted.
+    await cleanup(include_spicedb=False)
 
     yield
 
-    # Clean after test
-    await cleanup()
+    # Post-test: SpiceDB first (clear accumulated relationships), then SQL.
+    await cleanup(include_spicedb=True)
 
 
 @pytest.fixture

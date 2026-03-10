@@ -27,6 +27,7 @@ def mock_db_settings() -> DatabaseSettings:
         ssl_mode="prefer",
         pool_min_connections=2,
         pool_max_connections=10,
+        ssl_mode="prefer",  # Pin to avoid env-var interference (KARTOGRAPH_DB_SSL_MODE)
     )
 
 
